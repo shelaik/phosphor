@@ -22,7 +22,7 @@ enum Json {
     Bool(bool),
     Num(f64),
     Str(String),
-    Arr(Vec<Json>),
+    Arr, // present for shape only: the server never reads an array param
     Obj(Vec<(String, Json)>),
 }
 
@@ -56,14 +56,11 @@ fn parse_value_depth(p: &mut P, depth: u32) -> Json {
             Json::Obj(o)
         }
         b'[' => {
-            let mut a = Vec::new();
-            if p.arr_begin() {
-                loop {
-                    a.push(parse_value_depth(p, depth + 1));
-                    if !p.arr_sep() { break; }
-                }
-            }
-            Json::Arr(a)
+            // A syntactically valid array, but no MCP request field is ever read
+            // as one — consume and discard it (json::P::skip has its own 512-deep
+            // guard, so this stays bounded without threading `depth` through).
+            let _ = p.skip();
+            Json::Arr
         }
         b'"' => Json::Str(p.take_string().unwrap_or_default()),
         b't' | b'f' => Json::Bool(p.take_bool()),
@@ -89,7 +86,7 @@ impl Json {
             Json::Bool(b) => b.to_string(),
             Json::Num(n) => if n.fract() == 0.0 && n.is_finite() { format!("{}", *n as i64) } else { n.to_string() },
             Json::Str(s) => format!("\"{}\"", escape(s)),
-            Json::Arr(_) | Json::Obj(_) => "null".into(), // ids are never composite
+            Json::Arr | Json::Obj(_) => "null".into(), // ids are never composite
         }
     }
 }
