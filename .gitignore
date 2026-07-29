@@ -1,0 +1,27 @@
+# Rust build artifacts
+/target/
+
+# Local exports / portable bundles (may contain session data — never publish)
+*.phx
+phosphor-export-*
+phosphor-sessioni-*
+
+# Phosphor runtime files (belong in ~/.claude, not in the repo)
+phosphor.json
+.phosphor-cache*
+.phosphor-config.tmp
+
+# Build outputs live ONLY as GitHub Release assets, never in the repo: this
+# stays a build-from-source project (clone stays small, no binaries to trust).
+# release.ps1 rebuilds them into dist/ and attaches them to the release.
+dist/*.exe
+dist/SHA256SUMS.txt
+
+# Project-local Claude Code settings / scratch (belongs to the machine, not the repo)
+.claude/
+
+# OS / editor cruft
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp

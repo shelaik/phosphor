@@ -1,0 +1,35 @@
+[package]
+name = "phosphor"
+version = "0.11.0"
+edition = "2021"
+description = "Standalone scanner for local Claude Code sessions"
+
+[lib]
+name = "phosphor"
+path = "src/lib.rs"
+
+[[bin]]
+name = "phosphor"
+path = "src/main.rs"
+
+# Pixel-art "graphic adventure" GUI front-end (separate exe).
+# Build with:  cargo build --release --features adventure --bin phosphor-adv
+[[bin]]
+name = "phosphor-adv"
+path = "src/bin/adventure.rs"
+required-features = ["adventure"]
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+macroquad = { version = "0.4", optional = true }
+
+[features]
+adventure = ["dep:macroquad"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
