@@ -74,6 +74,14 @@ pub struct Session {
 }
 
 impl Session {
+    /// True for a session RECONSTRUCTED from `history.jsonl` by
+    /// [`crate::recover`]: the transcript it describes was deleted by Claude
+    /// Code's retention, so there is no file at `path` to read, resume or
+    /// export. Callers that touch the file must check this first.
+    pub fn is_ghost(&self) -> bool {
+        self.path.ends_with(crate::recover::GHOST_EXT)
+    }
+
     pub fn last_state(&self) -> &'static str {
         match self.last_kind {
             KIND_HUMAN => "in attesa di risposta",
@@ -307,11 +315,18 @@ pub struct Hit {
 /// Grep a transcript's readable turns for `needle_lower` (already lowercased).
 /// Returns up to `max` hits with a short snippet around each match.
 pub fn grep_transcript(path: &Path, needle_lower: &str, max: usize) -> Vec<Hit> {
+    grep_turns(&read_transcript(path), needle_lower, max)
+}
+
+/// Same search over turns already in memory — used for recovered sessions,
+/// whose "transcript" is rebuilt from `history.jsonl` rather than read from a
+/// file (see [`crate::recover`]).
+pub fn grep_turns(turns: &[Turn], needle_lower: &str, max: usize) -> Vec<Hit> {
     if needle_lower.is_empty() {
         return Vec::new();
     }
     let mut hits = Vec::new();
-    for (i, t) in read_transcript(path).into_iter().enumerate() {
+    for (i, t) in turns.iter().enumerate() {
         let lower = t.text.to_lowercase();
         if let Some(pos) = lower.find(needle_lower) {
             hits.push(Hit {

@@ -134,10 +134,36 @@ swatches in the help are all clickable too.
 - **Continuations**: sessions started by `/compact` or resume are detected and
   marked with `↳` (and linked to their parent), so resume chains no longer look
   like confusing duplicates.
+- **Recovered sessions** (`⚱`): Claude Code deletes its own transcripts after
+  `cleanupPeriodDays` (30 days by default), so old projects silently disappear
+  from the list. Phosphor rebuilds those sittings from `~/.claude/history.jsonl`
+  (never pruned) and the surviving `memory/` sidecars: real title, real prompts,
+  real dates. The assistant's replies, tokens and cost are gone for good and
+  stay at zero, and file-backed actions (resume, `.phx` export, delete) refuse
+  to run on them. See "Keeping your history" below.
 - **Global content search** (`g`): grep the real conversations across every
   session and jump straight to the matching message in the reader.
 - **Organize**: pin favorites (`*`, shown with `★`, filterable), attach a note
   per session (`n`, shown with `📝`), and export a session to Markdown (`M`).
+
+### Keeping your history
+
+Claude Code prunes `~/.claude/projects/<project>/<id>.jsonl` on startup: anything
+older than `cleanupPeriodDays` is unlinked (no recycle bin, no backup). The
+default is 30 days, so a project you have not touched in a month vanishes from
+Phosphor because there is nothing left on disk to scan. Only the top-level
+transcripts go — the `subagents/` and `memory/` subfolders stay behind, which is
+why an "empty" project folder can still hold gigabytes.
+
+To keep everything, raise the limit in `~/.claude/settings.json`:
+
+```json
+{ "cleanupPeriodDays": 3650 }
+```
+
+Do that BEFORE you rely on Phosphor for history. What is already deleted cannot
+be restored; the `⚱` recovery above is a skeleton rebuilt from the prompt
+history, not the conversation.
 
 ## Porting between PCs
 

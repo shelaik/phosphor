@@ -778,6 +778,16 @@ impl App {
         }
         remote
     }
+    /// Guard for actions that need a transcript FILE: true (and a status hint)
+    /// when the selection was reconstructed from `history.jsonl` because Claude
+    /// Code's retention deleted the original (see `crate::recover`).
+    fn selected_is_ghost(&mut self, action: &str) -> bool {
+        let ghost = self.selected().map(|s| s.is_ghost()).unwrap_or(false);
+        if ghost {
+            self.status = format!("sessione recuperata (transcript cancellato da Claude Code): {action} non disponibile");
+        }
+        ghost
+    }
     /// Open the right-click context menu over the session at view-index `idx`,
     /// anchored at the click position. Selects that row first so every action
     /// targets it (the menu items reuse the same `dispatch()` codes as the keys).
@@ -1002,6 +1012,10 @@ impl App {
             return;
         }
         let sel: Vec<&Session> = self.all.iter().filter(|s| self.marked.contains(&s.id)).collect();
+        if sel.iter().any(|s| s.is_ghost()) {
+            self.status = "⚠ una selezionata è recuperata: non ha un file da cancellare".into();
+            return;
+        }
         if sel.iter().any(|s| s.live == "running" || s.live == "idle") {
             self.status = "⚠ una selezionata è live: deselezionala prima".into();
             return;
@@ -1085,6 +1099,7 @@ impl App {
     /// Copy the selected session's transcript path to the system clipboard.
     fn copy_session_path(&mut self) {
         if self.selected_is_remote("copia percorso") { return; }
+        if self.selected_is_ghost("copia percorso") { return; }
         let path = match self.selected() { Some(s) => s.path.clone(), None => return };
         let ok = if self.dry { true } else { crate::copy_to_clipboard(&path) };
         self.status = if ok { format!("📋 copiato: {}", clip(&path, 44)) } else { "✗ copia negli appunti fallita".into() };
@@ -1259,6 +1274,7 @@ impl App {
         let (mut s, changed) = { let mut c = self.cache.lock().unwrap(); scan::scan_incremental(&projects, &mut c) };
         live::annotate(&self.base, &mut s);
         if changed { cache::save(&self.base, &s); }
+        crate::add_recovered(&self.base, &mut s);
         self.set_sessions(s);
         self.status = "scan completato".into();
     }
@@ -1304,7 +1320,7 @@ impl App {
         if self.dry { return; }
         if self.selected_is_remote("export markdown") { return; }
         let s = match self.selected() { Some(s) => s.clone(), None => return };
-        let turns = crate::scan::read_transcript(&PathBuf::from(&s.path));
+        let turns = crate::turns_of(&self.base, &s);
         let mut md = String::new();
         // Every field below is derived from the (untrusted) transcript — title,
         // path, id, timestamps, models — so ALL of them go through md_escape, not
@@ -1347,6 +1363,8 @@ impl App {
     /// Ask before resuming: surface the exact command and working directory.
     fn request_resume(&mut self) {
         if self.dry { return; }
+        // Nothing to resume: claude --resume needs the transcript it deleted.
+        if self.selected_is_ghost("riprendi") { return; }
         // A fleet session resumes on ITS machine, over ssh — no local cwd involved.
         if let Some(s) = self.selected() {
             if !s.host.is_empty() {
@@ -1430,11 +1448,14 @@ impl App {
     /// multi-selection active it bundles just those; else the whole current view.
     fn do_export_bundle(&mut self, out: PathBuf) {
         // Fleet rows are excluded: their transcripts live on another PC (no
-        // local path), so they'd only add empty manifest entries.
+        // local path), so they'd only add empty manifest entries. Recovered
+        // rows are excluded for the same reason — their transcript no longer
+        // exists anywhere.
+        let keep = |s: &Session| s.host.is_empty() && !s.is_ghost();
         let owned: Vec<Session> = if self.marked.is_empty() {
-            self.view_all.iter().map(|&i| self.all[i].clone()).filter(|s| s.host.is_empty()).collect()
+            self.view_all.iter().map(|&i| self.all[i].clone()).filter(|s| keep(s)).collect()
         } else {
-            self.all.iter().filter(|s| self.marked.contains(&s.id) && s.host.is_empty()).cloned().collect()
+            self.all.iter().filter(|s| self.marked.contains(&s.id) && keep(s)).cloned().collect()
         };
         let created = chrono::Local::now().to_rfc3339();
         let bytes = crate::bundle::build(&self.base, &owned, &created);
@@ -1528,8 +1549,8 @@ impl App {
         if self.selected_is_remote("lettura transcript") { return; }
         let s = match self.selected() { Some(s) => s, None => return };
         let title = s.title.replace('\n', " ");
-        let path = PathBuf::from(&s.path);
-        let turns = crate::scan::read_transcript(&path);
+        let s = s.clone();
+        let turns = crate::turns_of(&self.base, &s);
         if turns.is_empty() {
             self.status = "nessun messaggio leggibile in questa sessione".into();
             return;
@@ -1543,7 +1564,8 @@ impl App {
     fn open_reader_at(&mut self, sess: usize, turn: usize) {
         let s = match self.all.get(sess) { Some(s) => s, None => return };
         let title = s.title.replace('\n', " ");
-        let turns = crate::scan::read_transcript(&PathBuf::from(&s.path));
+        let s = s.clone();
+        let turns = crate::turns_of(&self.base, &s);
         if turns.is_empty() {
             self.status = "nessun messaggio leggibile in questa sessione".into();
             return;
@@ -1580,7 +1602,7 @@ impl App {
                 if !s.host.is_empty() {
                     continue;
                 }
-                for h in crate::scan::grep_transcript(&PathBuf::from(&s.path), &needle, PER_SESSION) {
+                for h in crate::grep_of(&self.base, s, &needle, PER_SESSION) {
                     results.push(GHit {
                         sess: idx,
                         turn: h.turn,
@@ -2124,6 +2146,7 @@ pub fn run(
             let (mut s, changed) = { let mut c = cache.lock().unwrap(); scan::scan_incremental(&projects, &mut c) };
             live::annotate(&base, &mut s);
             if changed { cache::save(&base, &s); }
+            crate::add_recovered(&base, &mut s);
             if tx.send(s).is_err() { break; }
         });
     }
@@ -3158,6 +3181,8 @@ fn render_sessions(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
                 if app.marked.contains(&s.id) { pre.push_str("◉ "); }
                 if app.is_favorite(&s.id) { pre.push_str("★ "); }
                 if app.notes.contains_key(&s.id) { pre.push_str("📝 "); }
+                // Rebuilt from history.jsonl: prompts only, no transcript behind it.
+                if s.is_ghost() { pre.push_str("⚱ "); }
                 if s.is_continuation && meta.depth == 0 && meta.children == 0 { pre.push_str("↳ "); }
                 // A COLLAPSED head stands for the whole conversation, so it shows
                 // the chain ROOT (original) title — not the latest "resume" greeting.
@@ -3605,6 +3630,11 @@ fn render_detail(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         ]),
         Line::raw(""),
         kv("host", if s.host.is_empty() { "questo PC".into() } else { format!("{}  (remoto via ssh — r per riprendere là)", s.host) }),
+        kv("origine", if s.is_ghost() {
+            "⚱ RECUPERATA da history.jsonl — Claude Code ha cancellato il transcript (cleanupPeriodDays). Solo i tuoi prompt: niente risposte, token o costi.".into()
+        } else {
+            "transcript su disco".to_string()
+        }),
         kv("progetto", s.project_path.clone()),
         kv("sessionId", s.id.clone()),
         kv("git branch", if s.git_branch.is_empty() { "—".into() } else { s.git_branch.clone() }),
@@ -3721,6 +3751,7 @@ fn render_help(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         Line::from(Span::styled("  LEGENDA SIMBOLI", Style::default().fg(th.accent).add_modifier(Modifier::BOLD))),
         item("↳", "sessione ripresa o da /compact (continua la precedente)"),
         item("★ · 📝 · ◉", "preferito  ·  ha una nota  ·  selezionata (multi-select)"),
+        item("⚱", "recuperata da history.jsonl: il transcript l'ha cancellato Claude Code (cleanupPeriodDays, 30 giorni di default). Restano i prompt; niente risposte, token, costo o riprendi. Alza cleanupPeriodDays in ~/.claude/settings.json per non perderne altre."),
         item("● ◐ ·", "stato:  ● attiva   ◐ in pausa (idle)   · conclusa"),
         item("⏎", "tasto Invio (apre il dettaglio della sessione)"),
         item("↑ ↓", "frecce su/giù (muovono la selezione)"),

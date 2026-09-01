@@ -9,6 +9,7 @@ pub mod json;
 pub mod live;
 pub mod mcp;
 pub mod plan;
+pub mod recover;
 pub mod scan;
 pub mod server;
 pub mod tui;
@@ -78,7 +79,45 @@ pub fn scan_once(base: &Path, cache: &mut HashMap<String, Session>) -> Vec<Sessi
     if changed {
         cache::save(base, &sessions);
     }
+    add_recovered(base, &mut sessions);
     sessions
+}
+
+/// Readable turns for ANY session: the real transcript when a file backs it,
+/// the prompts rebuilt from `history.jsonl` when it is a recovered ghost (whose
+/// `path` points at nothing). Callers never need to branch on the kind.
+pub fn turns_of(base: &Path, s: &scan::Session) -> Vec<scan::Turn> {
+    if s.is_ghost() {
+        recover::read_recovered(base, s)
+    } else {
+        scan::read_transcript(Path::new(&s.path))
+    }
+}
+
+/// [`turns_of`] + grep, so global content search covers recovered sessions too.
+pub fn grep_of(base: &Path, s: &scan::Session, needle_lower: &str, max: usize) -> Vec<scan::Hit> {
+    if s.is_ghost() {
+        scan::grep_turns(&recover::read_recovered(base, s), needle_lower, max)
+    } else {
+        scan::grep_transcript(Path::new(&s.path), needle_lower, max)
+    }
+}
+
+/// Append the sessions Claude Code's retention deleted, rebuilt from
+/// `history.jsonl`, and re-sort newest-first.
+///
+/// ALWAYS call this AFTER `cache::save`: a recovered session has no file behind
+/// it, so it must never enter the on-disk cache — it would never be evicted
+/// (the cache drops entries whose transcript vanished, and a ghost's never
+/// existed) and would make every scan report itself as "changed". Rebuilding it
+/// costs one pass over `history.jsonl` instead.
+pub fn add_recovered(base: &Path, sessions: &mut Vec<scan::Session>) {
+    let ghosts = recover::recover(base, sessions);
+    if ghosts.is_empty() {
+        return;
+    }
+    sessions.extend(ghosts);
+    sessions.sort_by(|a, b| b.mtime_ms.cmp(&a.mtime_ms));
 }
 
 /// Resume a Claude Code session in a fresh terminal — safely.

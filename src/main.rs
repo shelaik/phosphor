@@ -1187,6 +1187,7 @@ fn do_watch(base: &std::path::Path, cache_map: &mut std::collections::HashMap<St
     loop {
         let (mut sessions, _) = scan::scan_incremental(&projects, cache_map);
         live::annotate(base, &mut sessions);
+        phosphor::add_recovered(base, &mut sessions);
         let now = now_ms();
         for s in &sessions {
             let was = prev.get(&s.id).cloned();
@@ -1471,6 +1472,7 @@ fn main() {
     let (mut sessions, _) = scan::scan_incremental(&projects, &mut cache_map);
     live::annotate(&base, &mut sessions);
     cache::save(&base, &sessions);
+    phosphor::add_recovered(&base, &mut sessions);
     if !json_mode {
         eprintln!(
             "{} sessioni in {:.1}s",

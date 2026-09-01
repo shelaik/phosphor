@@ -98,7 +98,8 @@ pub fn run(base: PathBuf) -> io::Result<()> {
     // per session). Read-only; nothing is written.
     let projects = base.join("projects");
     let mut cache: HashMap<String, Session> = HashMap::new();
-    let (sessions, _) = scan::scan_incremental(&projects, &mut cache);
+    let (mut sessions, _) = scan::scan_incremental(&projects, &mut cache);
+    crate::add_recovered(&base, &mut sessions);
     eprintln!("phosphor mcp: {} sessioni indicizzate (sola lettura, offline)", sessions.len());
 
     let stdin = io::stdin();
