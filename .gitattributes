@@ -1,0 +1,4 @@
+# Il repo memorizza SEMPRE line ending LF: un editor (o uno script) che salva
+# in CRLF su Windows riscriverebbe altrimenti file interi e seppellirebbe la
+# modifica vera dentro un diff da migliaia di righe.
+* text=auto eol=lf
