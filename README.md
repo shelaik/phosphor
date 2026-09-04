@@ -1,10 +1,11 @@
 # Phosphor
 
-A standalone scanner for your local **Claude Code** sessions. A single Rust
-binary (~1.5 MB, no external runtime) that reads the local `~/.claude` directory
-and shows all your sessions (where they ran, what they did, where they left off)
-in a native full-screen terminal app, a browser dashboard, or a pixel-art
-graphical version.
+A standalone scanner for your local coding-agent sessions — **Claude Code** and
+the **Codex CLI**, side by side in one list. A single Rust binary (~1.5 MB, no
+external runtime) that reads `~/.claude` and `~/.codex` and shows all your
+sessions (where they ran, what they did, where they left off) in a native
+full-screen terminal app, a browser dashboard, or a pixel-art graphical
+version.
 
 Read-only by default: it never modifies your transcripts and never uploads
 anything on its own. The only feature that sends data out is the opt-in
@@ -21,6 +22,7 @@ confirmation.
 - [Options](#options)
 - [Shortcuts (TUI)](#shortcuts-tui)
 - [What it shows](#what-it-shows)
+- [Two agents in one list](#two-agents-in-one-list)
 - [Porting between PCs](#porting-between-pcs)
 - [Plan limits](#plan-limits)
 - [Security](#security)
@@ -134,6 +136,8 @@ swatches in the help are all clickable too.
 - **Continuations**: sessions started by `/compact` or resume are detected and
   marked with `↳` (and linked to their parent), so resume chains no longer look
   like confusing duplicates.
+- **Both agents** (`◆`): Codex CLI threads are listed next to the Claude Code
+  ones — see [Two agents in one list](#two-agents-in-one-list).
 - **Recovered sessions** (`⚱`): Claude Code deletes its own transcripts after
   `cleanupPeriodDays` (30 days by default), so old projects silently disappear
   from the list. Phosphor rebuilds those sittings from `~/.claude/history.jsonl`
@@ -164,6 +168,34 @@ To keep everything, raise the limit in `~/.claude/settings.json`:
 Do that BEFORE you rely on Phosphor for history. What is already deleted cannot
 be restored; the `⚱` recovery above is a skeleton rebuilt from the prompt
 history, not the conversation.
+
+## Two agents in one list
+
+Phosphor reads the **Codex CLI**'s own store as well
+(`$CODEX_HOME`, else `~/.codex`) and turns each of its rollouts into the same
+kind of row, so one list, one search and one cost total cover both agents. If
+Codex is not installed nothing changes and nothing is looked up.
+
+Codex rows are marked two ways, because colour alone is not a signal everyone
+can read: the project name is drawn in a second colour, and the title carries a
+`◆`. Filter with `agent:codex` / `agent:claude` (the detail card names the
+agent and its CLI version).
+
+What carries over, and what does not:
+
+| | Claude Code | Codex |
+|---|---|---|
+| Title | `aiTitle`, else first prompt | the thread name Codex itself shows in its picker |
+| Tokens / cost | Anthropic list prices | OpenAI list prices (`"gpt"` in `phosphor.json`) |
+| Sub-agents | `subagents/` sidecar transcripts | rollouts with a `parent_thread_id` (a `guardian_review` pass, a spawned agent) |
+| Live | per-pid session files | a writer lock plus a running `codex` process |
+| Resume (`r`) | `claude --resume` | `codex resume` (`codex fork` after a path remap) |
+| Read (`v`), search (`g`), Markdown export (`M`) | yes | yes |
+| `.phx` bundle, delete/archive project | yes | no — a `.phx` reproduces Claude Code's `projects/<encoded-cwd>` layout, which a Codex thread has no place in; use `codex delete <id>` / `codex archive <id>` |
+
+OpenAI reports `input_tokens` inclusive of the cached prefix and Anthropic
+reports it exclusive, so Phosphor subtracts the cached part from the Codex side.
+Both agents then cost through the same formula and the totals are comparable.
 
 ## Porting between PCs
 
@@ -349,17 +381,23 @@ writes these files (inside `.claude` and, for exports, on the Desktop):
 | File | Contents |
 |---|---|
 | `phosphor.json` | the configuration (theme, prices, budget…), atomic write |
-| `.phosphor-cache.v2.jsonl` | scan cache, regenerable (rewritten on each scan) |
+| `.phosphor-cache.v6.jsonl` | scan cache, regenerable (rewritten on each scan) |
 | `Desktop\phosphor-export-*` | CSV/JSON of the current view (timestamped, never overwrites) |
 | `Desktop\phosphor-sessioni-*.phx` | portable `export-all` bundle (timestamped, never overwrites) |
 
 Phosphor also reads `~/.claude.json` read-only for plan and limit reset; it does
 not touch the credentials file.
 
+The Codex store (`$CODEX_HOME`, else `~/.codex`) is read-only too: the rollouts
+under `sessions/`, the thread names in `session_index.jsonl`, and the lock file
+names under `thread-writer-locks/`. Phosphor writes nothing there — everything
+it keeps lives in `~/.claude` as above. `auth.json` is never opened.
+
 ## Configuration
 
 `~/.claude/phosphor.json` (created on first run): per-model prices (editable
-without recompiling), default `theme` and `pixel`, `watch` interval, monthly
+without recompiling — `opus` / `sonnet` / `haiku` for Claude Code, `gpt` for
+Codex, `default` for anything else), default `theme` and `pixel`, `watch` interval, monthly
 `budget` for alerts, `pathRemaps` for cross-PC resume, `syncRepo` /
 `syncEncrypt` / `syncIdentity` for the optional git sync, your `favorites`
 and `notes`, and `energyWhPerToken` / `waterMlPerToken` for the (rough) energy

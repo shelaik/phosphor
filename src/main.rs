@@ -13,7 +13,7 @@
 
 use phosphor::scan::Session;
 use phosphor::server::State;
-use phosphor::{cache, config, live, rescan, scan, server, tui};
+use phosphor::{cache, config, live, rescan, server, tui};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -64,7 +64,7 @@ fn print_table(sessions: &[Session]) {
 
 fn help() {
     println!(
-"phosphor — scanner delle sessioni di Claude Code (sola lettura)
+"phosphor — scanner delle sessioni di Claude Code e Codex (sola lettura)
 
 USO
   phosphor [comando] [opzioni]
@@ -233,7 +233,13 @@ fn print_cost(base: &std::path::Path, sessions: &[Session], cfg: &config::Config
         sessions.iter().filter(|s| now.saturating_sub(s.mtime_ms) < w).map(|s| config::cost(s, prices)).sum()
     };
     let d = 86_400_000u64;
-    println!("Spesa stimata (Claude Code):");
+    // The window totals mix agents when both are installed, so name them: the
+    // Claude and the Codex halves are priced off different lists.
+    let cx = sessions.iter().filter(|s| s.is_codex()).count();
+    println!(
+        "Spesa stimata ({}):",
+        if cx > 0 { "Claude Code + Codex" } else { "Claude Code" }
+    );
     println!("  ultime 5h  : {}   (finestra limiti breve — stima locale)", usd(win(5 * 3_600_000)));
     println!("  ultime 24h : {}", usd(win(d)));
     println!("  ultimi 7g  : {}", usd(win(7 * d)));
@@ -1180,12 +1186,11 @@ fn do_sync_pull(base: &std::path::Path, repo: &std::path::Path, identity: &str) 
 fn do_watch(base: &std::path::Path, cache_map: &mut std::collections::HashMap<String, Session>, prices: &config::Prices, interval: u64) {
     use std::collections::{HashMap, HashSet};
     println!("Phosphor watch — Ctrl+C per uscire (ogni {}s)\n", interval.max(2));
-    let projects = base.join("projects");
     let mut prev: HashMap<String, String> = HashMap::new();
     let mut stuck: HashSet<String> = HashSet::new();
     let mut first = true;
     loop {
-        let (mut sessions, _) = scan::scan_incremental(&projects, cache_map);
+        let (mut sessions, _) = phosphor::scan_all(base, cache_map);
         live::annotate(base, &mut sessions);
         phosphor::add_recovered(base, &mut sessions);
         let now = now_ms();
@@ -1468,8 +1473,7 @@ fn main() {
     }
     let t0 = std::time::Instant::now();
     let mut cache_map = cache::load(&base);
-    let projects = base.join("projects");
-    let (mut sessions, _) = scan::scan_incremental(&projects, &mut cache_map);
+    let (mut sessions, _) = phosphor::scan_all(&base, &mut cache_map);
     live::annotate(&base, &mut sessions);
     cache::save(&base, &sessions);
     phosphor::add_recovered(&base, &mut sessions);

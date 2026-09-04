@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 fn cache_path(base: &Path) -> PathBuf {
     // versioned: bumping this invalidates old caches when the schema changes
-    base.join(".phosphor-cache.v5.jsonl")
+    base.join(".phosphor-cache.v6.jsonl")
 }
 
 pub fn load(base: &Path) -> HashMap<String, Session> {
@@ -67,7 +67,7 @@ fn to_line(s: &Session) -> String {
             "\"sm\":\"{}\",\"fp\":\"{}\",\"lp\":\"{}\",\"mc\":{},\"it\":{},\"ot\":{},",
             "\"cr\":{},\"cc\":{},\"md\":[{}],\"tl\":[{}],\"fl\":[{}],\"gb\":\"{}\",",
             "\"v\":\"{}\",\"ep\":\"{}\",\"cd\":\"{}\",\"mo\":\"{}\",\"mt\":{},\"sz\":{},",
-            "\"sc\":{},\"ct\":{},\"lk\":{},\"st\":\"{}\",\"ks\":\"{}\"}}"
+            "\"sc\":{},\"ct\":{},\"lk\":{},\"st\":\"{}\",\"ks\":\"{}\",\"ag\":\"{}\"}}"
         ),
         escape(&s.id),
         escape(&s.path),
@@ -97,6 +97,7 @@ fn to_line(s: &Session) -> String {
         s.last_kind,
         escape(&s.search_text),
         ks,
+        escape(&s.agent),
     )
 }
 
@@ -175,6 +176,7 @@ fn parse_line(buf: &[u8]) -> Option<Session> {
             "mo" => s.modified = p.take_string().unwrap_or_default(),
             "mt" => s.mtime_ms = p.take_number() as u64,
             "sz" => s.size = p.take_number() as u64,
+            "ag" => s.agent = p.take_string().unwrap_or_default(),
             "sc" => s.is_sidechain = p.take_bool(),
             "ct" => s.is_continuation = p.take_bool(),
             "lk" => s.last_kind = p.take_number() as u8,

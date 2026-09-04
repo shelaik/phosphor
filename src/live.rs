@@ -131,10 +131,12 @@ fn load_live(base: &Path) -> HashMap<String, LiveInfo> {
     map
 }
 
-/// Set of currently-running PIDs (Windows: `tasklist`).
+/// Currently-running processes: their PIDs, and their lowercased image names
+/// (Windows: `tasklist`). The names let the Codex pass tell a live agent from a
+/// lock file a crash left behind.
 #[cfg(windows)]
-fn running_pids() -> HashSet<u64> {
-    let mut set = HashSet::new();
+fn running_procs() -> (HashSet<u64>, HashSet<String>) {
+    let (mut pids, mut names) = (HashSet::new(), HashSet::new());
     if let Ok(out) = std::process::Command::new("tasklist")
         .args(["/FO", "CSV", "/NH"])
         .output()
@@ -145,34 +147,57 @@ fn running_pids() -> HashSet<u64> {
             let cols: Vec<&str> = line.split("\",\"").collect();
             if cols.len() >= 2 {
                 if let Ok(pid) = cols[1].trim_matches('"').trim().parse::<u64>() {
-                    set.insert(pid);
+                    pids.insert(pid);
                 }
+                names.insert(cols[0].trim_matches('"').trim().to_lowercase());
             }
         }
     }
-    set
+    (pids, names)
 }
 
 #[cfg(not(windows))]
-fn running_pids() -> HashSet<u64> {
-    let mut set = HashSet::new();
+fn running_procs() -> (HashSet<u64>, HashSet<String>) {
+    let (mut pids, mut names) = (HashSet::new(), HashSet::new());
     if let Ok(rd) = std::fs::read_dir("/proc") {
         for e in rd.flatten() {
             if let Some(name) = e.file_name().to_str() {
                 if let Ok(pid) = name.parse::<u64>() {
-                    set.insert(pid);
+                    pids.insert(pid);
+                    if let Ok(comm) = std::fs::read_to_string(e.path().join("comm")) {
+                        names.insert(comm.trim().to_lowercase());
+                    }
                 }
             }
         }
     }
-    set
+    (pids, names)
 }
 
 /// Annotate sessions with live/idle/ended state.
 pub fn annotate(base: &Path, sessions: &mut [Session]) {
     let live = load_live(base);
-    let pids = running_pids();
+    let (pids, names) = running_procs();
+    // Codex tracks its open threads with a lock file per thread instead of the
+    // per-pid session files Claude Code writes. A crash can strand a lock, so it
+    // only counts while a codex process is actually up.
+    let codex_home = crate::codex::home();
+    let codex_open: HashSet<String> = codex_home
+        .as_deref()
+        .map(crate::codex::open_threads)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let codex_up = names.iter().any(|n| n.starts_with("codex"));
     for s in sessions.iter_mut() {
+        if s.is_codex() {
+            s.live = if codex_up && codex_open.contains(&s.id) {
+                "running".into()
+            } else {
+                "ended".into()
+            };
+            continue;
+        }
         match live.get(&s.id) {
             Some(info) if info.pid != 0 && pids.contains(&info.pid) => {
                 s.pid = info.pid;

@@ -197,6 +197,9 @@ pub fn parse_sessions_json(data: &[u8], host: &str) -> Vec<Session> {
                     "subagents" => s.subagents = num(&mut p),
                     "workflows" => s.workflows = num(&mut p),
                     "sidechain" => s.is_sidechain = p.take_bool(),
+                    // A remote row keeps the agent that produced it, so the
+                    // fleet view labels a Codex session as one.
+                    "agent" => s.agent = clean(p.take_string()),
                     "live" => s.live = clean(p.take_string()),
                     "status" => s.status = clean(p.take_string()),
                     "pid" => s.pid = num(&mut p),

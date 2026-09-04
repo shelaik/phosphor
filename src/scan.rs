@@ -11,8 +11,8 @@ use std::time::UNIX_EPOCH;
 
 // Last-event classification, used to guess "where the session is at".
 const KIND_NONE: u8 = 0;
-const KIND_HUMAN: u8 = 1; // user typed a prompt -> waiting for assistant
-const KIND_ASSISTANT_TEXT: u8 = 2; // assistant final text -> idle / done
+pub(crate) const KIND_HUMAN: u8 = 1; // user typed a prompt -> waiting for assistant
+pub(crate) const KIND_ASSISTANT_TEXT: u8 = 2; // assistant final text -> idle / done
 const KIND_ASSISTANT_TOOL: u8 = 3; // assistant requested a tool, no result yet
 const KIND_TOOLRESULT: u8 = 4; // tool result delivered -> assistant thinking
 
@@ -71,6 +71,10 @@ pub struct Session {
     /// local. Never cached, never exported: set only when ingesting a remote
     /// `phosphor json` (see `fleet`), so a rescan can tell local from remote.
     pub host: String,
+    /// Which coding agent wrote this session: empty (or "claude") = Claude
+    /// Code, "codex" = OpenAI Codex CLI (see `crate::codex`). A string rather
+    /// than an enum so a third agent costs no schema change.
+    pub agent: String,
 }
 
 impl Session {
@@ -80,6 +84,14 @@ impl Session {
     /// export. Callers that touch the file must check this first.
     pub fn is_ghost(&self) -> bool {
         self.path.ends_with(crate::recover::GHOST_EXT)
+    }
+
+    /// True for a session recorded by the Codex CLI rather than Claude Code.
+    /// The two store transcripts in different trees, in different formats, and
+    /// resume with different commands — so anything that touches the file or
+    /// launches the agent must branch on this.
+    pub fn is_codex(&self) -> bool {
+        self.agent == "codex"
     }
 
     pub fn last_state(&self) -> &'static str {
@@ -114,7 +126,7 @@ fn fnv1a_64(s: &str) -> u64 {
 }
 
 const SEARCH_CAP: usize = 16384;
-fn push_search(buf: &mut String, txt: &str) {
+pub(crate) fn push_search(buf: &mut String, txt: &str) {
     if buf.len() >= SEARCH_CAP || txt.is_empty() {
         return;
     }
@@ -127,7 +139,7 @@ fn push_search(buf: &mut String, txt: &str) {
     buf.push(' ');
 }
 
-fn trunc(mut s: String) -> String {
+pub(crate) fn trunc(mut s: String) -> String {
     if s.len() > PROMPT_CAP {
         let mut end = PROMPT_CAP;
         while end > 0 && !s.is_char_boundary(end) {
@@ -235,7 +247,10 @@ pub fn scan_incremental(
             _ => to_parse.push((path.clone(), *size)),
         }
     }
-    let removed = cache.len() != reused.len();
+    // The cache map is SHARED with the Codex scanner (`crate::codex`), which
+    // owns its own keys: count and evict only the rows this scanner produced,
+    // or every pass would look changed and thrash the file.
+    let removed = cache.values().filter(|v| !v.is_codex()).count() != reused.len();
     let changed = !to_parse.is_empty() || removed;
 
     // Parse the changed/new transcripts in parallel.
@@ -273,7 +288,7 @@ pub fn scan_incremental(
     for s in &parsed {
         cache.insert(s.path.clone(), s.clone());
     }
-    cache.retain(|k, _| valid.contains(k));
+    cache.retain(|k, v| valid.contains(k) || v.is_codex());
 
     let mut sessions = reused;
     sessions.extend(parsed);
@@ -295,8 +310,8 @@ pub fn parse_one(path: &Path, size: u64) -> Option<Session> {
 // Transcript reader: extract the human-readable conversation for in-app reading.
 // ---------------------------------------------------------------------------
 
-const READER_MSG_CAP: usize = 6000;
-const READER_TEXT_CAP: usize = 12000;
+pub(crate) const READER_MSG_CAP: usize = 6000;
+pub(crate) const READER_TEXT_CAP: usize = 12000;
 
 /// One readable turn of a conversation. `role`: 0 = user, 1 = assistant,
 /// 2 = note (tool/other). Thinking blocks and raw tool I/O are omitted.
@@ -373,13 +388,16 @@ fn snippet_around(text: &str, pos: usize, len: usize) -> String {
 /// most MAX_LINE bytes and drain the rest of an oversized line WITHOUT keeping
 /// it; the JSON parser then simply fails on that (truncated) line — the safe
 /// outcome for a hostile giant line.
-const MAX_LINE: usize = 8 * 1024 * 1024; // 8 MiB
+pub(crate) const MAX_LINE: usize = 8 * 1024 * 1024; // 8 MiB
 
 /// Like `BufRead::read_until(b'\n', line)` but bounded: `line` never grows past
 /// MAX_LINE. Still consumes the whole physical line from the stream (so the
 /// caller keeps advancing), returning Ok(0) only at EOF. An oversized line is
 /// truncated to MAX_LINE and its overflow discarded instead of allocated.
-fn read_line_capped<R: BufRead>(r: &mut R, line: &mut Vec<u8>) -> std::io::Result<usize> {
+pub(crate) fn read_line_capped<R: BufRead>(
+    r: &mut R,
+    line: &mut Vec<u8>,
+) -> std::io::Result<usize> {
     let mut consumed = 0usize;
     loop {
         let (done, used) = {

@@ -23,7 +23,7 @@
 
 use crate::json::P;
 use crate::scan::Session;
-use chrono::{Local, TimeZone};
+use chrono::{TimeZone, Utc};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -120,11 +120,14 @@ fn rfc3339_ms(s: &str) -> u64 {
         .unwrap_or(0)
 }
 
+/// Format an epoch-millisecond stamp the way the transcripts do: RFC3339 in
+/// **UTC**. Both agents record UTC, and the list renders these strings raw, so
+/// a local-time ghost would sort and display hours away from the real sessions
+/// around it.
 fn iso(ms: u64) -> String {
-    Local
-        .timestamp_millis_opt(ms as i64)
+    Utc.timestamp_millis_opt(ms as i64)
         .single()
-        .map(|d| d.to_rfc3339())
+        .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
         .unwrap_or_default()
 }
 

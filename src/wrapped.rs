@@ -78,7 +78,9 @@ fn window_label(w: &Window) -> String {
     }
 }
 
-fn window_subtitle(w: &Window) -> String {
+/// `agents`: what actually appears in the window, so the card never claims a
+/// tool the numbers did not come from.
+fn window_subtitle(w: &Window, agents: &str) -> String {
     let span = match w {
         Window::Days(7) => "la tua settimana".to_string(),
         Window::Days(30) => "il tuo mese".to_string(),
@@ -86,7 +88,7 @@ fn window_subtitle(w: &Window) -> String {
         Window::Year(_) => "il tuo anno".to_string(),
         Window::All => "tutto il tuo tempo".to_string(),
     };
-    format!("{span} con Claude Code · 100% offline")
+    format!("{span} con {agents} · 100% offline")
 }
 
 fn in_window(s: &Session, now_ms: u64, w: &Window) -> bool {
@@ -174,6 +176,8 @@ fn model_family(m: &str) -> &'static str {
         "Sonnet"
     } else if m.contains("haiku") {
         "Haiku"
+    } else if m.starts_with("gpt") || m.contains("codex") {
+        "GPT"
     } else {
         "altro"
     }
@@ -243,7 +247,16 @@ pub fn render(sessions: &[Session], cfg: &Config, now_ms: u64, opts: &Opts) -> C
     let phone_charges = (wh / 12.0).round() as u64; // ~12 Wh per phone charge
     let bottles = (water_ml / 500.0).round() as u64; // 0.5 L bottles
 
-    let subtitle = window_subtitle(&opts.window);
+    let (cx, cc) = (
+        sel.iter().filter(|s| s.is_codex()).count(),
+        sel.iter().filter(|s| !s.is_codex()).count(),
+    );
+    let agents = match (cc > 0, cx > 0) {
+        (true, true) => "Claude Code + Codex",
+        (false, true) => "Codex",
+        _ => "Claude Code",
+    };
+    let subtitle = window_subtitle(&opts.window, agents);
     let svg = draw(SvgData {
         label: &label,
         subtitle: &subtitle,

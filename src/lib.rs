@@ -3,6 +3,7 @@
 
 pub mod bundle;
 pub mod cache;
+pub mod codex;
 pub mod config;
 pub mod fleet;
 pub mod json;
@@ -73,8 +74,7 @@ pub fn csv_field(x: &str) -> String {
 /// One incremental scan pass: reuse `cache`, parse changes, annotate liveness,
 /// persist the cache, and return the sessions (newest first).
 pub fn scan_once(base: &Path, cache: &mut HashMap<String, Session>) -> Vec<Session> {
-    let projects = base.join("projects");
-    let (mut sessions, changed) = scan::scan_incremental(&projects, cache);
+    let (mut sessions, changed) = scan_all(base, cache);
     live::annotate(base, &mut sessions);
     if changed {
         cache::save(base, &sessions);
@@ -83,12 +83,50 @@ pub fn scan_once(base: &Path, cache: &mut HashMap<String, Session>) -> Vec<Sessi
     sessions
 }
 
+/// One incremental scan of EVERY agent's store: Claude Code under
+/// `<base>/projects`, plus the Codex CLI under its own home when it is
+/// installed. Returns the merged list newest-first and whether anything had to
+/// be (re)parsed, so the caller knows when to persist the cache.
+///
+/// Both scanners share one cache map and each evicts only its own rows; see
+/// `codex::scan_incremental`.
+pub fn scan_all(base: &Path, cache: &mut HashMap<String, Session>) -> (Vec<Session>, bool) {
+    let (mut sessions, mut changed) = scan::scan_incremental(&base.join("projects"), cache);
+    // `--dir` asks for THAT store, not this machine's: blending the local Codex
+    // sessions into an imported or inspected `.claude` would mix two unrelated
+    // datasets, so the Codex pass runs only for the default base.
+    if is_default_base(base) {
+        if let Some(home) = codex::home() {
+            let (cx, cx_changed) = codex::scan_incremental(&home, cache);
+            changed |= cx_changed;
+            if !cx.is_empty() {
+                sessions.extend(cx);
+                sessions.sort_by(|a, b| b.mtime_ms.cmp(&a.mtime_ms));
+            }
+        }
+    }
+    (sessions, changed)
+}
+
+/// True when `base` is this user's own `~/.claude` rather than a store passed
+/// with `--dir`. Compared through `canonicalize` so a symlinked or
+/// differently-spelled path to the same directory still counts.
+fn is_default_base(base: &Path) -> bool {
+    let d = default_base();
+    if base == d.as_path() {
+        return true;
+    }
+    matches!((base.canonicalize(), d.canonicalize()), (Ok(a), Ok(b)) if a == b)
+}
+
 /// Readable turns for ANY session: the real transcript when a file backs it,
 /// the prompts rebuilt from `history.jsonl` when it is a recovered ghost (whose
 /// `path` points at nothing). Callers never need to branch on the kind.
 pub fn turns_of(base: &Path, s: &scan::Session) -> Vec<scan::Turn> {
     if s.is_ghost() {
         recover::read_recovered(base, s)
+    } else if s.is_codex() {
+        codex::read_transcript(Path::new(&s.path))
     } else {
         scan::read_transcript(Path::new(&s.path))
     }
@@ -96,8 +134,8 @@ pub fn turns_of(base: &Path, s: &scan::Session) -> Vec<scan::Turn> {
 
 /// [`turns_of`] + grep, so global content search covers recovered sessions too.
 pub fn grep_of(base: &Path, s: &scan::Session, needle_lower: &str, max: usize) -> Vec<scan::Hit> {
-    if s.is_ghost() {
-        scan::grep_turns(&recover::read_recovered(base, s), needle_lower, max)
+    if s.is_ghost() || s.is_codex() {
+        scan::grep_turns(&turns_of(base, s), needle_lower, max)
     } else {
         scan::grep_transcript(Path::new(&s.path), needle_lower, max)
     }
@@ -134,6 +172,52 @@ pub fn resume_session(cwd: &str, id: &str) -> bool {
 /// branches the conversation instead of writing back into the original.
 pub fn resume_session_fork(cwd: &str, id: &str) -> bool {
     resume_session_opt(cwd, id, true)
+}
+
+/// Resume a **Codex** session: `codex resume <id>` in a fresh terminal, or
+/// `codex fork <id>` when `fork` is set. Same guarantees as [`resume_session`]
+/// — the id must be UUID-shaped and the cwd a real directory free of
+/// quote/control chars — because the argument checks, not the command name, are
+/// what make the launch injection-proof. Codex looks a thread up by id wherever
+/// it is run, but it is started in the recorded working directory anyway so the
+/// workspace matches the conversation.
+pub fn resume_codex_session(cwd: &str, id: &str, fork: bool) -> bool {
+    if !valid_session_id(id) || cwd.is_empty() || cwd.len() > 400 {
+        return false;
+    }
+    if cwd.chars().any(|ch| matches!(ch, '"' | '\n' | '\r' | '\0' | '%')) {
+        return false;
+    }
+    if !Path::new(cwd).is_dir() {
+        return false;
+    }
+    spawn_codex_resume(cwd, id, fork)
+}
+
+#[cfg(windows)]
+fn spawn_codex_resume(cwd: &str, id: &str, fork: bool) -> bool {
+    use std::os::windows::process::CommandExt;
+    // Same launcher shape as `spawn_resume` — see the long note there for why
+    // the `start` hop is required for the new window to own a real console.
+    // `codex` is an npm shim (`codex.cmd`), which is exactly what `cmd /K`
+    // resolves.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let verb = if fork { "fork" } else { "resume" };
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", "cmd", "/K", "codex", verb, id])
+        .current_dir(cwd)
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .is_ok()
+}
+
+#[cfg(not(windows))]
+fn spawn_codex_resume(cwd: &str, id: &str, fork: bool) -> bool {
+    std::process::Command::new("codex")
+        .args([if fork { "fork" } else { "resume" }, id])
+        .current_dir(cwd)
+        .spawn()
+        .is_ok()
 }
 
 /// True when `id` is safe to place in an argv passed to `claude --resume` (or

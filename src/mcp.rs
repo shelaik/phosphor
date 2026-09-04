@@ -96,9 +96,8 @@ impl Json {
 pub fn run(base: PathBuf) -> io::Result<()> {
     // Index the user's sessions once at startup (the client launches one server
     // per session). Read-only; nothing is written.
-    let projects = base.join("projects");
     let mut cache: HashMap<String, Session> = HashMap::new();
-    let (mut sessions, _) = scan::scan_incremental(&projects, &mut cache);
+    let (mut sessions, _) = crate::scan_all(&base, &mut cache);
     crate::add_recovered(&base, &mut sessions);
     eprintln!("phosphor mcp: {} sessioni indicizzate (sola lettura, offline)", sessions.len());
 
@@ -140,7 +139,7 @@ fn handle(line: &str, sessions: &[Session]) -> Option<String> {
                 concat!(
                     "{{\"protocolVersion\":\"{}\",\"capabilities\":{{\"tools\":{{}}}},",
                     "\"serverInfo\":{{\"name\":\"phosphor\",\"version\":\"{}\"}},",
-                    "\"instructions\":\"Memoria delle sessioni Claude Code passate dell'utente (sola lettura, locale). Usa search_sessions per trovarle, read_session per leggerne una, search_content per cercare nel testo delle conversazioni.\"}}"
+                    "\"instructions\":\"Memoria delle sessioni passate dell'utente (Claude Code e Codex) (sola lettura, locale). Usa search_sessions per trovarle, read_session per leggerne una, search_content per cercare nel testo delle conversazioni.\"}}"
                 ),
                 escape(pv), crate::VERSION
             );
@@ -263,7 +262,7 @@ fn text_result(id: &str, text: &str, is_error: bool) -> String {
 }
 
 const TOOLS_LIST: &str = r#"{"tools":[
-{"name":"search_sessions","description":"Cerca tra le sessioni Claude Code passate dell'utente. Supporta testo libero e filtri inline: project: model: file: tool: after:YYYY-MM-DD before:YYYY-MM-DD (es. \"parser project:phosphor after:2026-06-01\"). Restituisce titolo, progetto, data, conteggi e id.","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Testo + filtri opzionali. Vuoto = sessioni piu' recenti."},"limit":{"type":"integer","description":"Max risultati (default 20)."}}}},
+{"name":"search_sessions","description":"Cerca tra le sessioni passate dell'utente. Supporta testo libero e filtri inline: project: model: file: tool: agent: after:YYYY-MM-DD before:YYYY-MM-DD (es. \"parser project:phosphor after:2026-06-01\"). Restituisce titolo, progetto, data, conteggi e id.","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Testo + filtri opzionali. Vuoto = sessioni piu' recenti."},"limit":{"type":"integer","description":"Max risultati (default 20)."}}}},
 {"name":"read_session","description":"Legge il transcript (conversazione) di una sessione dato il suo id (ottenuto da search_sessions).","inputSchema":{"type":"object","properties":{"id":{"type":"string","description":"L'id della sessione."},"max_chars":{"type":"integer","description":"Limite caratteri (default 20000)."}},"required":["id"]}},
 {"name":"search_content","description":"Cerca una stringa NEL CONTENUTO di tutte le conversazioni passate e restituisce frammenti con la sessione di origine.","inputSchema":{"type":"object","properties":{"text":{"type":"string","description":"Testo da cercare nel contenuto."},"limit":{"type":"integer","description":"Max frammenti (default 20)."}},"required":["text"]}}
 ]}"#;

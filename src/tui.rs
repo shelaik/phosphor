@@ -278,6 +278,11 @@ struct Theme {
     bg: Color,
     run: Color,
     idle: Color,
+    /// Second agent (Codex). Deliberately off the theme's own hue in every
+    /// palette so the two agents never read as the same family of rows —
+    /// colour alone is not the whole signal (see the `◆` marker), but it is
+    /// what makes them separable at a glance while scrolling.
+    alt: Color,
 }
 
 pub const THEME_NAMES: [&str; 7] =
@@ -302,13 +307,13 @@ fn rgb(r: u8, g: u8, b: u8) -> Color {
 }
 fn theme(idx: usize) -> Theme {
     match idx % THEME_COUNT {
-        1 => Theme { fg: rgb(255, 176, 0), dim: rgb(122, 85, 16), accent: rgb(255, 224, 138), bg: rgb(12, 8, 2), run: rgb(255, 210, 74), idle: rgb(185, 132, 42) },
-        2 => Theme { fg: rgb(120, 230, 255), dim: rgb(40, 110, 140), accent: rgb(190, 250, 255), bg: rgb(4, 10, 16), run: rgb(90, 235, 200), idle: rgb(255, 210, 120) },
-        3 => Theme { fg: rgb(255, 120, 200), dim: rgb(120, 50, 110), accent: rgb(120, 230, 255), bg: rgb(20, 7, 30), run: rgb(120, 255, 180), idle: rgb(255, 215, 120) },
-        4 => Theme { fg: rgb(0, 255, 70), dim: rgb(0, 110, 40), accent: rgb(170, 255, 120), bg: rgb(0, 8, 0), run: rgb(120, 255, 160), idle: rgb(200, 255, 120) },
-        5 => Theme { fg: rgb(255, 95, 85), dim: rgb(130, 42, 38), accent: rgb(255, 185, 120), bg: rgb(16, 4, 4), run: rgb(255, 145, 120), idle: rgb(255, 200, 120) },
-        6 => Theme { fg: rgb(120, 185, 255), dim: rgb(50, 80, 140), accent: rgb(190, 215, 255), bg: rgb(4, 8, 22), run: rgb(120, 255, 205), idle: rgb(255, 215, 120) },
-        _ => Theme { fg: rgb(59, 240, 106), dim: rgb(31, 122, 58), accent: rgb(200, 255, 50), bg: rgb(7, 10, 7), run: rgb(91, 255, 143), idle: rgb(255, 204, 51) },
+        1 => Theme { fg: rgb(255, 176, 0), dim: rgb(122, 85, 16), accent: rgb(255, 224, 138), bg: rgb(12, 8, 2), run: rgb(255, 210, 74), idle: rgb(185, 132, 42), alt: rgb(120, 200, 255) },
+        2 => Theme { fg: rgb(120, 230, 255), dim: rgb(40, 110, 140), accent: rgb(190, 250, 255), bg: rgb(4, 10, 16), run: rgb(90, 235, 200), idle: rgb(255, 210, 120), alt: rgb(255, 190, 120) },
+        3 => Theme { fg: rgb(255, 120, 200), dim: rgb(120, 50, 110), accent: rgb(120, 230, 255), bg: rgb(20, 7, 30), run: rgb(120, 255, 180), idle: rgb(255, 215, 120), alt: rgb(160, 255, 170) },
+        4 => Theme { fg: rgb(0, 255, 70), dim: rgb(0, 110, 40), accent: rgb(170, 255, 120), bg: rgb(0, 8, 0), run: rgb(120, 255, 160), idle: rgb(200, 255, 120), alt: rgb(120, 210, 255) },
+        5 => Theme { fg: rgb(255, 95, 85), dim: rgb(130, 42, 38), accent: rgb(255, 185, 120), bg: rgb(16, 4, 4), run: rgb(255, 145, 120), idle: rgb(255, 200, 120), alt: rgb(150, 220, 255) },
+        6 => Theme { fg: rgb(120, 185, 255), dim: rgb(50, 80, 140), accent: rgb(190, 215, 255), bg: rgb(4, 8, 22), run: rgb(120, 255, 205), idle: rgb(255, 215, 120), alt: rgb(255, 190, 130) },
+        _ => Theme { fg: rgb(59, 240, 106), dim: rgb(31, 122, 58), accent: rgb(200, 255, 50), bg: rgb(7, 10, 7), run: rgb(91, 255, 143), idle: rgb(255, 204, 51), alt: rgb(255, 170, 220) },
     }
 }
 
@@ -655,7 +660,7 @@ struct Picker {
 /// confirmation before it touches the disk or launches a process.
 enum Pending {
     Export { csv: PathBuf, json: PathBuf },
-    Resume { id: String, cwd: String, fork: bool },
+    Resume { id: String, cwd: String, fork: bool, codex: bool },
     ExportBundle { out: PathBuf },
     ImportBundle { src: PathBuf },
     ArchiveProject { dir: PathBuf, name: String },
@@ -787,6 +792,17 @@ impl App {
             self.status = format!("sessione recuperata (transcript cancellato da Claude Code): {action} non disponibile");
         }
         ghost
+    }
+    /// Guard for actions that only make sense inside Claude Code's `projects/`
+    /// tree: true (and a status hint) when the selection is a Codex session,
+    /// which lives in `~/.codex/sessions` and is laid out per date, not per
+    /// project folder.
+    fn selected_is_codex(&mut self, action: &str) -> bool {
+        let codex = self.selected().map(|s| s.is_codex()).unwrap_or(false);
+        if codex {
+            self.status = format!("sessione Codex (~/.codex): {action} non disponibile");
+        }
+        codex
     }
     /// Open the right-click context menu over the session at view-index `idx`,
     /// anchored at the click position. Selects that row first so every action
@@ -1016,6 +1032,12 @@ impl App {
             self.status = "⚠ una selezionata è recuperata: non ha un file da cancellare".into();
             return;
         }
+        if sel.iter().any(|s| s.is_codex()) {
+            // delete_session_file is confined to projects/ and would refuse
+            // anyway; say so up front instead of reporting a silent 0 deleted.
+            self.status = "⚠ una selezionata è Codex: cancellala con  codex delete <id>".into();
+            return;
+        }
         if sel.iter().any(|s| s.live == "running" || s.live == "idle") {
             self.status = "⚠ una selezionata è live: deselezionala prima".into();
             return;
@@ -1109,6 +1131,7 @@ impl App {
     /// nothing is destroyed, so no type-to-confirm (unlike delete).
     fn request_archive_project(&mut self) {
         if self.selected_is_remote("archivia") { return; }
+        if self.selected_is_codex("archivia progetto") { return; }
         let sel = match self.selected() { Some(s) => s, None => return };
         let dir = match Path::new(&sel.path).parent() { Some(p) => p.to_path_buf(), None => return };
         let name = if sel.project_name.is_empty() {
@@ -1270,8 +1293,7 @@ impl App {
     }
     fn rescan_now(&mut self) {
         if self.dry { return; }
-        let projects = self.base.join("projects");
-        let (mut s, changed) = { let mut c = self.cache.lock().unwrap(); scan::scan_incremental(&projects, &mut c) };
+        let (mut s, changed) = { let mut c = self.cache.lock().unwrap(); crate::scan_all(&self.base, &mut c) };
         live::annotate(&self.base, &mut s);
         if changed { cache::save(&self.base, &s); }
         crate::add_recovered(&self.base, &mut s);
@@ -1381,12 +1403,17 @@ impl App {
                 return;
             }
         }
-        let (id, path, recorded) = match self.selected() { Some(s) => (s.id.clone(), s.path.clone(), s.project_path.clone()), None => return };
+        let (id, path, recorded, codex) = match self.selected() {
+            Some(s) => (s.id.clone(), s.path.clone(), s.project_path.clone(), s.is_codex()),
+            None => return,
+        };
         if recorded.is_empty() { self.status = "cwd mancante".into(); return; }
         // The recorded cwd may be a subdir the user cd'd into; claude resumes
         // under the STARTUP cwd's folder (= the transcript's parent dir), so
         // correct it before resolving, else claude can't find the session.
-        let recorded = crate::resume_cwd_for(&path, &recorded);
+        // Codex indexes threads by id instead of by folder, so it needs none of
+        // this — its rollouts live in a date tree, not an encoded-cwd one.
+        let recorded = if codex { recorded } else { crate::resume_cwd_for(&path, &recorded) };
         // Resolve the working directory: as-is if it exists here, else via a
         // user-configured cross-PC remap (pathRemaps in phosphor.json).
         let (cwd, fork) = match crate::resolve_cwd(&recorded, &self.remaps) {
@@ -1399,10 +1426,15 @@ impl App {
                 return;
             }
         };
+        let cmdline = if codex {
+            format!("  codex {} {}", if fork { "fork" } else { "resume" }, clip(&id, 12))
+        } else {
+            format!("  claude --resume {}{}", clip(&id, 12), if fork { " --fork-session" } else { "" })
+        };
         let mut lines = vec![
             "Aprirò un NUOVO terminale ed eseguirò:".into(),
             String::new(),
-            format!("  claude --resume {}{}", clip(&id, 12), if fork { " --fork-session" } else { "" }),
+            cmdline,
             String::new(),
             "nella cartella di lavoro:".into(),
             format!("  {}", cwd),
@@ -1410,14 +1442,25 @@ impl App {
         if fork {
             lines.push(String::new());
             lines.push(format!("(percorso originale non presente: «{}»)", clip(&recorded, 44)));
-            lines.push("remap applicato → uso --fork-session (sessione derivata).".into());
+            lines.push(if codex {
+                "remap applicato → uso  codex fork  (sessione derivata).".into()
+            } else {
+                "remap applicato → uso --fork-session (sessione derivata).".to_string()
+            });
         }
-        self.confirm = Some(Confirm { title: " CONFERMA RIPRENDI ".into(), lines, action: Pending::Resume { id, cwd, fork } });
+        self.confirm = Some(Confirm { title: " CONFERMA RIPRENDI ".into(), lines, action: Pending::Resume { id, cwd, fork, codex } });
     }
     /// Actually spawn the resume terminal (already confirmed).
-    fn do_resume_now(&mut self, id: String, cwd: String, fork: bool) {
-        let ok = if fork { crate::resume_session_fork(&cwd, &id) } else { crate::resume_session(&cwd, &id) };
-        self.status = if ok { format!("▶ riprendo {} …", clip(&id, 8)) } else { "✗ impossibile avviare claude".into() };
+    fn do_resume_now(&mut self, id: String, cwd: String, fork: bool, codex: bool) {
+        let ok = if codex {
+            crate::resume_codex_session(&cwd, &id, fork)
+        } else if fork {
+            crate::resume_session_fork(&cwd, &id)
+        } else {
+            crate::resume_session(&cwd, &id)
+        };
+        let agent = if codex { "codex" } else { "claude" };
+        self.status = if ok { format!("▶ riprendo {} …", clip(&id, 8)) } else { format!("✗ impossibile avviare {agent}") };
         // Belt-and-suspenders: re-assert mouse capture in case spawning the child
         // process perturbed this console's input mode, so clicks keep working.
         if !self.dry {
@@ -1451,7 +1494,11 @@ impl App {
         // local path), so they'd only add empty manifest entries. Recovered
         // rows are excluded for the same reason — their transcript no longer
         // exists anywhere.
-        let keep = |s: &Session| s.host.is_empty() && !s.is_ghost();
+        // Codex rollouts are excluded too: a `.phx` reproduces the
+        // `projects/<encoded-cwd>/…` layout Claude Code resumes from, and a
+        // Codex thread has no place in it — importing one would drop a file
+        // Claude Code can never open.
+        let keep = |s: &Session| s.host.is_empty() && !s.is_ghost() && !s.is_codex();
         let owned: Vec<Session> = if self.marked.is_empty() {
             self.view_all.iter().map(|&i| self.all[i].clone()).filter(|s| keep(s)).collect()
         } else {
@@ -1470,6 +1517,7 @@ impl App {
     /// project is live. Nothing is touched here — the modal drives the rest.
     fn request_delete_project(&mut self) {
         if self.selected_is_remote("cancella progetto") { return; }
+        if self.selected_is_codex("cancella progetto") { return; }
         let sel = match self.selected() { Some(s) => s, None => return };
         let dir = match Path::new(&sel.path).parent() { Some(p) => p.to_path_buf(), None => return };
         let name = if sel.project_name.is_empty() {
@@ -1786,7 +1834,7 @@ impl App {
         if self.dry { return; } // test mode: never touch disk / spawn
         match action {
             Pending::Export { csv, json } => self.do_export(csv, json),
-            Pending::Resume { id, cwd, fork } => self.do_resume_now(id, cwd, fork),
+            Pending::Resume { id, cwd, fork, codex } => self.do_resume_now(id, cwd, fork, codex),
             Pending::ExportBundle { out } => self.do_export_bundle(out),
             Pending::ImportBundle { src } => self.do_import_bundle(src),
             Pending::ArchiveProject { dir, name } => self.do_archive_now(dir, name),
@@ -1912,7 +1960,7 @@ pub fn selftest(base: PathBuf, all: Vec<Session>, cache: Arc<Mutex<HashMap<Strin
             });
             term.draw(|f| ui(f, &mut app)).expect("draw confirm");
             for r in 0..sz.1 { for c in (0..sz.0).step_by(3) { let _ = handle_mouse(&mut app, mk_click(c, r)); } }
-            app.confirm = Some(Confirm { title: " C ".into(), lines: vec![], action: Pending::Resume { id: "0".into(), cwd: "C:/Windows".into(), fork: false } });
+            app.confirm = Some(Confirm { title: " C ".into(), lines: vec![], action: Pending::Resume { id: "0".into(), cwd: "C:/Windows".into(), fork: false, codex: false } });
             let _ = handle_key(&mut app, KeyCode::Esc, KeyModifiers::empty());
             // portable bundle export + import confirm modals (dry: no I/O)
             app.confirm = Some(Confirm { title: " EXP ".into(), lines: vec!["bundle".into()], action: Pending::ExportBundle { out: PathBuf::from("x.phx") } });
@@ -2142,8 +2190,7 @@ pub fn run(
         let cache = cache.clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_secs(watch));
-            let projects = base.join("projects");
-            let (mut s, changed) = { let mut c = cache.lock().unwrap(); scan::scan_incremental(&projects, &mut c) };
+            let (mut s, changed) = { let mut c = cache.lock().unwrap(); crate::scan_all(&base, &mut c) };
             live::annotate(&base, &mut s);
             if changed { cache::save(&base, &s); }
             crate::add_recovered(&base, &mut s);
@@ -3130,7 +3177,7 @@ fn footer(app: &App, th: &Theme) -> Paragraph<'static> {
         format!("{field}: {}_   (Invio salva · Esc annulla · vuoto = rimuove)", app.note_buf)
     } else if app.searching {
         if app.search.is_empty() {
-            "cerca: _   (testo libero · filtri: project: model: file: tool: host: after: before:)".into()
+            "cerca: _   (testo libero · filtri: project: model: file: tool: agent: host: after: before:)".into()
         } else {
             format!("cerca: {}_", app.search)
         }
@@ -3169,7 +3216,11 @@ fn render_sessions(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         let (wh, ml) = crate::config::footprint(s, app.energy_wh_per_token, app.water_ml_per_token);
         Row::new(vec![
             Cell::from(dot).style(Style::default().fg(dc)),
-            Cell::from(clip(&s.project_name, 18)).style(Style::default().fg(th.accent)),
+            // Two signals, never one: the hue separates the agents at a glance
+            // while scrolling, the `◆` survives a monochrome terminal, a
+            // colour-blind reader and a copy-paste of the screen.
+            Cell::from(clip(&s.project_name, 18))
+                .style(Style::default().fg(if s.is_codex() { th.alt } else { th.accent })),
             Cell::from({
                 let mut pre = String::new();
                 if meta.depth >= 1 {
@@ -3183,6 +3234,7 @@ fn render_sessions(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
                 if app.notes.contains_key(&s.id) { pre.push_str("📝 "); }
                 // Rebuilt from history.jsonl: prompts only, no transcript behind it.
                 if s.is_ghost() { pre.push_str("⚱ "); }
+                if s.is_codex() { pre.push_str("◆ "); }
                 if s.is_continuation && meta.depth == 0 && meta.children == 0 { pre.push_str("↳ "); }
                 // A COLLAPSED head stands for the whole conversation, so it shows
                 // the chain ROOT (original) title — not the latest "resume" greeting.
@@ -3385,6 +3437,7 @@ pub(crate) struct Query {
     file: Vec<String>,
     tool: Vec<String>,
     host: Vec<String>,
+    agent: Vec<String>,
     after: Option<String>,
     before: Option<String>,
 }
@@ -3401,6 +3454,7 @@ impl Query {
                         "file" => { q.file.push(val.to_string()); continue; }
                         "tool" => { q.tool.push(val.to_string()); continue; }
                         "host" => { q.host.push(val.to_string()); continue; }
+                        "agent" | "cli" => { q.agent.push(val.to_string()); continue; }
                         "after" | "since" => { q.after = Some(val.to_string()); continue; }
                         "before" | "until" => { q.before = Some(val.to_string()); continue; }
                         _ => {}
@@ -3431,6 +3485,12 @@ impl Query {
                 s.host.to_lowercase().contains(h)
             };
             if !ok { return false; }
+        }
+        for a in &self.agent {
+            // "agent:codex" / "agent:claude" — a session with no agent recorded
+            // predates the field and is Claude Code's.
+            let mine = if s.agent.is_empty() { "claude" } else { s.agent.as_str() };
+            if !mine.contains(a.as_str()) { return false; }
         }
         if self.after.is_some() || self.before.is_some() {
             let day = session_day(s);
@@ -3630,6 +3690,11 @@ fn render_detail(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         ]),
         Line::raw(""),
         kv("host", if s.host.is_empty() { "questo PC".into() } else { format!("{}  (remoto via ssh — r per riprendere là)", s.host) }),
+        kv("agente", if s.is_codex() {
+            format!("Codex CLI{}", if s.version.is_empty() { String::new() } else { format!(" v{}", s.version) })
+        } else {
+            "Claude Code".to_string()
+        }),
         kv("origine", if s.is_ghost() {
             "⚱ RECUPERATA da history.jsonl — Claude Code ha cancellato il transcript (cleanupPeriodDays). Solo i tuoi prompt: niente risposte, token o costi.".into()
         } else {
@@ -3751,6 +3816,7 @@ fn render_help(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         Line::from(Span::styled("  LEGENDA SIMBOLI", Style::default().fg(th.accent).add_modifier(Modifier::BOLD))),
         item("↳", "sessione ripresa o da /compact (continua la precedente)"),
         item("★ · 📝 · ◉", "preferito  ·  ha una nota  ·  selezionata (multi-select)"),
+        item("◆", "sessione Codex (~/.codex/sessions) invece che Claude Code: nome del progetto in un altro colore, riprende con  codex resume . Filtro:  agent:codex . Token e costo sono quelli di OpenAI (prezzi \"gpt\" in phosphor.json)."),
         item("⚱", "recuperata da history.jsonl: il transcript l'ha cancellato Claude Code (cleanupPeriodDays, 30 giorni di default). Restano i prompt; niente risposte, token, costo o riprendi. Alza cleanupPeriodDays in ~/.claude/settings.json per non perderne altre."),
         item("● ◐ ·", "stato:  ● attiva   ◐ in pausa (idle)   · conclusa"),
         item("⏎", "tasto Invio (apre il dettaglio della sessione)"),
@@ -3774,7 +3840,7 @@ fn render_help(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         item("spazio", "seleziona/deseleziona (◉) per azioni in blocco  ·  Esc azzera"),
         item("in blocco", "con selezione attiva:  x bundle  ·  * preferiti  ·  X cancella (conferma)"),
         item("a", "esplora sub-agenti / workflow"),
-        item("/", "filtra la lista — testo + filtri: project: model: file: tool: host: after: before:"),
+        item("/", "filtra la lista — testo + filtri: project: model: file: tool: agent: host: after: before:"),
         item("f  ·  o/s", "filtro stato/★preferiti  ·  ordina colonna/direzione"),
         item("m", "metrica grafici (o click sui bottoni)"),
         item("r  ·  e", "riprendi (claude --resume)  ·  export CSV/JSON"),
@@ -3851,6 +3917,7 @@ fn render_help(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         Line::from(Span::styled("  Usa", Style::default().fg(th.accent))),
         Line::from(Span::styled("     F          interroga gli host e unisce le sessioni [alias]", Style::default().fg(th.fg))),
         Line::from(Span::styled("     host:nome  filtra per PC ( host:qui  = solo locali)", Style::default().fg(th.fg))),
+        Line::from(Span::styled("     agent:codex / agent:claude  filtra per agente", Style::default().fg(th.fg))),
         Line::from(Span::styled("     r          su una riga [alias]: apre  ssh -t <alias>", Style::default().fg(th.fg))),
         Line::from(Span::styled("                phosphor resume-here <id>  → riprende LÀ", Style::default().fg(th.fg))),
         Line::from(Span::styled("  Sulle righe remote restano attivi r/dettaglio/note/preferiti;", Style::default().fg(th.dim))),
@@ -4120,6 +4187,33 @@ mod tree_tests {
         // both rows visible as independent heads (no [+] chain folding)
         assert_eq!(app.view.len(), 2, "remote row is its own head, not a hidden child");
         assert!(app.row_meta.iter().all(|m| m.children == 0), "no cross-host chains");
+    }
+
+    #[test]
+    fn query_agent_filter_and_codex_gating() {
+        let mut cx = sess("ccc", "imgnav", "C:/imgnav", "sessione codex", 2000);
+        cx.agent = "codex".into();
+        // a row written before the field existed is Claude Code's
+        let cc = sess("aaa", "imgnav", "C:/imgnav", "sessione claude", 1000);
+        assert!(Query::parse("agent:codex").matches(&cx));
+        assert!(!Query::parse("agent:codex").matches(&cc));
+        assert!(Query::parse("agent:claude").matches(&cc));
+        assert!(!Query::parse("agent:claude").matches(&cx));
+
+        // gating: a Codex thread has no project folder under projects/, so the
+        // project-level destructive actions must refuse it outright
+        let mut app = app_with(vec![cc, cx]);
+        let cp = app.view.iter().position(|&i| app.all[i].id == "ccc").unwrap();
+        app.ts.select(Some(cp));
+        app.request_delete_project();
+        assert!(app.confirm.is_none() && app.delproj.is_none(), "niente modale per Codex");
+        app.request_archive_project();
+        assert!(app.confirm.is_none(), "niente archiviazione per Codex");
+        // …and bulk delete refuses the whole selection rather than silently
+        // deleting nothing (delete_session_file is confined to projects/)
+        app.marked.insert("ccc".to_string());
+        app.request_delete_marked();
+        assert!(app.confirm.is_none(), "niente cancellazione di massa con dentro Codex");
     }
 
     #[test]

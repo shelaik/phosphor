@@ -17,6 +17,8 @@ pub struct Prices {
     pub opus: Price,
     pub sonnet: Price,
     pub haiku: Price,
+    /// OpenAI GPT-5 class, used for the Codex sessions (`crate::codex`).
+    pub gpt: Price,
     pub default: Price,
 }
 impl Default for Prices {
@@ -28,6 +30,9 @@ impl Default for Prices {
             opus: Price { pin: 5.0, pout: 25.0, pcr: 0.5, pcw: 6.25 },
             sonnet: Price { pin: 3.0, pout: 15.0, pcr: 0.30, pcw: 3.75 },
             haiku: Price { pin: 1.0, pout: 5.0, pcr: 0.10, pcw: 1.25 },
+            // GPT-5 a listino: 1.25 in / 10 out, cache read 0.1x. OpenAI non
+            // fattura la scrittura di cache, quindi pcw = pin.
+            gpt: Price { pin: 1.25, pout: 10.0, pcr: 0.125, pcw: 1.25 },
             default: Price { pin: 5.0, pout: 25.0, pcr: 0.5, pcw: 6.25 },
         }
     }
@@ -95,6 +100,10 @@ pub fn cost(s: &Session, p: &Prices) -> f64 {
         &p.haiku
     } else if m.contains("opus") {
         &p.opus
+    } else if s.is_codex() || m.starts_with("gpt") || m.starts_with("o1") || m.starts_with("o3") {
+        // Codex bills against OpenAI's list, not Anthropic's; a session with no
+        // model recorded still costs like the agent that produced it.
+        &p.gpt
     } else {
         &p.default
     };
@@ -297,6 +306,7 @@ fn parse(buf: &[u8], c: &mut Config) {
                                 "opus" => c.prices.opus = pr,
                                 "sonnet" => c.prices.sonnet = pr,
                                 "haiku" => c.prices.haiku = pr,
+                                "gpt" => c.prices.gpt = pr,
                                 "default" => c.prices.default = pr,
                                 _ => {}
                             }
@@ -353,7 +363,7 @@ pub fn save(base: &Path, c: &Config) {
         .collect::<Vec<_>>()
         .join(",\n");
     let txt = format!(
-        "{{\n  \"theme\": \"{}\",\n  \"pixel\": {},\n  \"watch\": {},\n  \"budget\": {},\n  \"energyWhPerToken\": {},\n  \"waterMlPerToken\": {},\n  \"syncRepo\": \"{}\",\n  \"syncEncrypt\": \"{}\",\n  \"syncIdentity\": \"{}\",\n  \"favorites\": [{}],\n  \"remotes\": [{}],\n  \"notes\": {{{}}},\n  \"aliases\": {{{}}},\n  \"pathRemaps\": {{{}}},\n  \"prices\": {{\n    \"opus\":    {},\n    \"sonnet\":  {},\n    \"haiku\":   {},\n    \"default\": {}\n  }}\n}}\n",
+        "{{\n  \"theme\": \"{}\",\n  \"pixel\": {},\n  \"watch\": {},\n  \"budget\": {},\n  \"energyWhPerToken\": {},\n  \"waterMlPerToken\": {},\n  \"syncRepo\": \"{}\",\n  \"syncEncrypt\": \"{}\",\n  \"syncIdentity\": \"{}\",\n  \"favorites\": [{}],\n  \"remotes\": [{}],\n  \"notes\": {{{}}},\n  \"aliases\": {{{}}},\n  \"pathRemaps\": {{{}}},\n  \"prices\": {{\n    \"opus\":    {},\n    \"sonnet\":  {},\n    \"haiku\":   {},\n    \"gpt\":     {},\n    \"default\": {}\n  }}\n}}\n",
         crate::json::escape(&c.theme),
         c.pixel,
         c.watch,
@@ -371,6 +381,7 @@ pub fn save(base: &Path, c: &Config) {
         pr(&c.prices.opus),
         pr(&c.prices.sonnet),
         pr(&c.prices.haiku),
+        pr(&c.prices.gpt),
         pr(&c.prices.default)
     );
     // Atomic write (tmp + rename) so a crash mid-write can't corrupt the config.
@@ -382,6 +393,24 @@ pub fn save(base: &Path, c: &Config) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn codex_sessions_are_priced_off_the_gpt_list() {
+        let p = Prices::default();
+        let mut s = crate::scan::Session::default();
+        s.agent = "codex".into();
+        s.models = vec!["gpt-5.6-sol".into()];
+        s.input_tokens = 1_000_000;
+        s.output_tokens = 1_000_000;
+        // 1.25 in + 10 out, not Anthropic's 5/25
+        assert!((cost(&s, &p) - 11.25).abs() < 1e-9);
+        // and a Codex thread whose model was never recorded still bills as one
+        s.models.clear();
+        assert!((cost(&s, &p) - 11.25).abs() < 1e-9);
+        // …while a Claude session with no model keeps the Anthropic default
+        s.agent.clear();
+        assert!((cost(&s, &p) - 30.0).abs() < 1e-9);
+    }
+
     use super::*;
 
     #[test]
