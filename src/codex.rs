@@ -606,6 +606,23 @@ fn to_session(r: Roll, path: &Path, size: u64, mtime: u64, titles: &HashMap<Stri
     s
 }
 
+/// Parse ONE rollout into a session, with no store around it — used by
+/// `crate::vault` to read a transcript that only exists as a vault hardlink
+/// (its `sessions/` tree, and with it `session_index.jsonl`, may be long gone,
+/// so the title falls back to the conversation).
+pub fn parse_one(path: &Path, size: u64, mtime: u64, titles: &HashMap<String, String>) -> Option<Session> {
+    let r = read_roll(path)?;
+    if !r.parent.is_empty() {
+        return None; // a sub-agent thread is never a session of its own
+    }
+    Some(to_session(r, path, size, mtime, titles))
+}
+
+/// The thread names, for callers that parse rollouts one at a time.
+pub fn titles(home: &Path) -> HashMap<String, String> {
+    read_titles(home)
+}
+
 /// Incremental scan of the Codex store, mirroring `scan::scan_incremental`:
 /// entries whose size+mtime are unchanged are reused from `cache`, the rest are
 /// re-read. Returns `(sessions, changed)`.
@@ -655,7 +672,7 @@ pub fn scan_incremental(home: &Path, cache: &mut HashMap<String, Session>) -> (V
     // Evict Codex rows whose rollout is gone, leaving the Claude Code rows in
     // this shared map untouched (the other scanner owns those).
     let before = cache.len();
-    cache.retain(|k, v| !v.is_codex() || valid.contains(k));
+    cache.retain(|k, v| !v.is_codex() || v.is_vaulted() || valid.contains(k));
     if cache.len() != before {
         changed = true;
     }

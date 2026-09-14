@@ -75,10 +75,16 @@ pub struct Config {
     /// data center efficiente). Il footprint TOTALE (incl. acqua per l'energia)
     /// può essere ~100x più alto — vedi LCA Mistral.
     pub water_ml_per_token: f64,
+    /// Keep transcripts alive by hard-linking them into `<base>/phosphor-vault`
+    /// (see [`crate::vault`]). **Off by default**: it is the one feature that
+    /// creates files, and Phosphor is read-only until the user says otherwise.
+    /// A link costs no extra bytes, so the only real cost is the transcripts
+    /// that would have been deleted.
+    pub vault: bool,
 }
 impl Default for Config {
     fn default() -> Self {
-        Config { prices: Prices::default(), theme: "fosfori".into(), watch: 5, pixel: false, budget: 0.0, path_remaps: Vec::new(), sync_repo: String::new(), sync_encrypt: String::new(), sync_identity: String::new(), favorites: Vec::new(), notes: Vec::new(), aliases: Vec::new(), remotes: Vec::new(), energy_wh_per_token: 0.0005, water_ml_per_token: 0.0005 }
+        Config { prices: Prices::default(), theme: "fosfori".into(), watch: 5, pixel: false, budget: 0.0, path_remaps: Vec::new(), sync_repo: String::new(), sync_encrypt: String::new(), sync_identity: String::new(), favorites: Vec::new(), notes: Vec::new(), aliases: Vec::new(), remotes: Vec::new(), energy_wh_per_token: 0.0005, water_ml_per_token: 0.0005, vault: false }
     }
 }
 
@@ -196,6 +202,7 @@ fn parse(buf: &[u8], c: &mut Config) {
             }
             "energyWhPerToken" => c.energy_wh_per_token = p.take_number().max(0.0),
             "waterMlPerToken" => c.water_ml_per_token = p.take_number().max(0.0),
+            "vault" => c.vault = p.take_bool(),
             "syncEncrypt" => {
                 if let Some(v) = p.take_string() {
                     c.sync_encrypt = v;
@@ -363,13 +370,14 @@ pub fn save(base: &Path, c: &Config) {
         .collect::<Vec<_>>()
         .join(",\n");
     let txt = format!(
-        "{{\n  \"theme\": \"{}\",\n  \"pixel\": {},\n  \"watch\": {},\n  \"budget\": {},\n  \"energyWhPerToken\": {},\n  \"waterMlPerToken\": {},\n  \"syncRepo\": \"{}\",\n  \"syncEncrypt\": \"{}\",\n  \"syncIdentity\": \"{}\",\n  \"favorites\": [{}],\n  \"remotes\": [{}],\n  \"notes\": {{{}}},\n  \"aliases\": {{{}}},\n  \"pathRemaps\": {{{}}},\n  \"prices\": {{\n    \"opus\":    {},\n    \"sonnet\":  {},\n    \"haiku\":   {},\n    \"gpt\":     {},\n    \"default\": {}\n  }}\n}}\n",
+        "{{\n  \"theme\": \"{}\",\n  \"pixel\": {},\n  \"watch\": {},\n  \"budget\": {},\n  \"energyWhPerToken\": {},\n  \"waterMlPerToken\": {},\n  \"vault\": {},\n  \"syncRepo\": \"{}\",\n  \"syncEncrypt\": \"{}\",\n  \"syncIdentity\": \"{}\",\n  \"favorites\": [{}],\n  \"remotes\": [{}],\n  \"notes\": {{{}}},\n  \"aliases\": {{{}}},\n  \"pathRemaps\": {{{}}},\n  \"prices\": {{\n    \"opus\":    {},\n    \"sonnet\":  {},\n    \"haiku\":   {},\n    \"gpt\":     {},\n    \"default\": {}\n  }}\n}}\n",
         crate::json::escape(&c.theme),
         c.pixel,
         c.watch,
         c.budget,
         c.energy_wh_per_token,
         c.water_ml_per_token,
+        c.vault,
         crate::json::escape(&c.sync_repo),
         crate::json::escape(&c.sync_encrypt),
         crate::json::escape(&c.sync_identity),

@@ -22,6 +22,7 @@ confirmation.
 - [Options](#options)
 - [Shortcuts (TUI)](#shortcuts-tui)
 - [What it shows](#what-it-shows)
+- [The vault](#the-vault--keep-transcripts-for-zero-extra-bytes)
 - [Two agents in one list](#two-agents-in-one-list)
 - [Porting between PCs](#porting-between-pcs)
 - [Plan limits](#plan-limits)
@@ -79,6 +80,7 @@ on your PATH. To compile from source, see [Build](#build-from-source).
 | `resume-here <id>` | resume a session in the CURRENT terminal (used by fleet over ssh) |
 | `sync set <dir>` | configure a local git repo (private) for bundle sync |
 | `sync push` / `pull` | send this PC's bundle / import other PCs' bundles via git |
+| `vault [on\|off]` | hard-link vault that keeps transcripts alive after deletion (0 extra bytes); no args = status; `vault restore <id>` puts one back |
 
 ## Options
 
@@ -110,7 +112,8 @@ mouse too.
 | `o` / `s` | sort column / direction | | `t` / `T` | theme forward / back |
 | `a` | sub-agents and workflows | | `p` | pixel graphics on/off |
 | `R` | immediate rescan | | `m` | chart metric |
-| `F` | fleet: merge sessions from your other PCs (ssh) | | `q` / `Ctrl+C` | quit |
+| `F` | fleet: merge sessions from your other PCs (ssh) | | `V` | restore a `⛁` session from the vault |
+| `q` / `Ctrl+C` | quit | | | |
 
 The *Resume*, *export* and *import* actions show what they will do first and ask
 for confirmation (`s` to confirm, `Esc` to cancel).
@@ -138,6 +141,9 @@ swatches in the help are all clickable too.
   like confusing duplicates.
 - **Both agents** (`◆`): Codex CLI threads are listed next to the Claude Code
   ones — see [Two agents in one list](#two-agents-in-one-list).
+- **Vault** (`⛁`): transcripts that outlived deletion because `vault on` had
+  hard-linked them — full sessions, restorable with `V`. See
+  [The vault](#the-vault--keep-transcripts-for-zero-extra-bytes).
 - **Recovered sessions** (`⚱`): Claude Code deletes its own transcripts after
   `cleanupPeriodDays` (30 days by default), so old projects silently disappear
   from the list. Phosphor rebuilds those sittings from `~/.claude/history.jsonl`
@@ -168,6 +174,38 @@ To keep everything, raise the limit in `~/.claude/settings.json`:
 Do that BEFORE you rely on Phosphor for history. What is already deleted cannot
 be restored; the `⚱` recovery above is a skeleton rebuilt from the prompt
 history, not the conversation.
+
+### The vault (`⛁`): keep transcripts for zero extra bytes
+
+Raising `cleanupPeriodDays` stops Claude Code. It does not stop a disk cleaner,
+a sync tool mirroring a deletion, or Codex pruning its own store. The vault does:
+
+```
+phosphor vault on
+```
+
+From then on every scan **hard-links** each transcript into
+`~/.claude/phosphor-vault/`. A hard link is a second name for the same bytes on
+the same volume, so while the original exists the vault costs nothing — on a
+real store, 893 MB of conversations came to 0.02 MB of directory entries. When
+something deletes the original, that link simply becomes the file's only name:
+the data never moves and never doubles. **The vault grows by exactly what you
+would otherwise have lost, and by nothing else.**
+
+A transcript that survives this way keeps its `⛁` row in the list, complete —
+tokens, tools, the whole conversation, not the `⚱` skeleton. Press `V` (or
+`phosphor vault restore <id>`) to link it back into its agent's store, and
+`claude --resume` / `codex resume` find it again.
+
+`phosphor vault` reports what is held and, separately, how much of it is
+*orphans* — the transcripts whose original is gone. Only those bytes are storage
+you are actually paying for.
+
+It is **off by default**: Phosphor is read-only until you say otherwise, and
+this is the one feature that creates files. Nothing is linked, read or created
+before you turn it on. Hard links cannot cross volumes, so if `CODEX_HOME` sits
+on another drive those transcripts are reported as skipped rather than silently
+copied — copying is exactly the cost the design exists to avoid.
 
 ## Two agents in one list
 
@@ -381,7 +419,8 @@ writes these files (inside `.claude` and, for exports, on the Desktop):
 | File | Contents |
 |---|---|
 | `phosphor.json` | the configuration (theme, prices, budget…), atomic write |
-| `.phosphor-cache.v6.jsonl` | scan cache, regenerable (rewritten on each scan) |
+| `.phosphor-cache.v7.jsonl` | scan cache, regenerable (rewritten on each scan) |
+| `phosphor-vault/` | hard links to your transcripts, only if you ran `vault on` (no extra bytes; see [The vault](#the-vault--keep-transcripts-for-zero-extra-bytes)) |
 | `Desktop\phosphor-export-*` | CSV/JSON of the current view (timestamped, never overwrites) |
 | `Desktop\phosphor-sessioni-*.phx` | portable `export-all` bundle (timestamped, never overwrites) |
 
@@ -400,7 +439,8 @@ without recompiling — `opus` / `sonnet` / `haiku` for Claude Code, `gpt` for
 Codex, `default` for anything else), default `theme` and `pixel`, `watch` interval, monthly
 `budget` for alerts, `pathRemaps` for cross-PC resume, `syncRepo` /
 `syncEncrypt` / `syncIdentity` for the optional git sync, your `favorites`
-and `notes`, and `energyWhPerToken` / `waterMlPerToken` for the (rough) energy
+and `notes`, `vault` for the hard-link vault (off by default),
+and `energyWhPerToken` / `waterMlPerToken` for the (rough) energy
 and water footprint estimate shown by `cost` and in the detail view.
 
 Seven retro palettes cycled with `t` / `T`: phosphor (green), amber, ice,

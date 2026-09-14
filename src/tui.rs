@@ -270,6 +270,7 @@ const A_OPENFOLDER: u16 = 30;
 const A_COPYPATH: u16 = 31;
 const A_ARCHIVE: u16 = 32;
 const A_FLEET: u16 = 33;
+const A_VAULT_RESTORE: u16 = 34;
 
 struct Theme {
     fg: Color,
@@ -826,6 +827,7 @@ impl App {
             MenuItem { key: "O",   label: "Apri cartella",         action: A_OPENFOLDER },
             MenuItem { key: "y",   label: "Copia percorso",        action: A_COPYPATH },
             MenuItem { key: "H",   label: "Archivia progetto",     action: A_ARCHIVE },
+            MenuItem { key: "V",   label: "Ripristina dal vault",  action: A_VAULT_RESTORE },
             MenuItem { key: "D",   label: "Cancella progetto…",    action: A_DELPROJECT },
         ];
         self.menu = Some(Menu { title, items, sel: 0, col, row });
@@ -1117,6 +1119,33 @@ impl App {
             crate::open_folder(&dir);
         }
         self.status = format!("apro  {}", clip(&dir, 44));
+    }
+    /// Put the selected vaulted transcript back into its agent's store, so the
+    /// agent can find and resume it again. Another hard link — nothing is
+    /// copied and the vault keeps its own name for the same bytes — so this is
+    /// safe to do and cheap to undo (delete the restored file).
+    fn restore_from_vault(&mut self) {
+        if self.dry {
+            return;
+        }
+        let s = match self.selected() {
+            Some(s) if s.is_vaulted() => s.clone(),
+            Some(_) => {
+                self.status = "V vale solo sulle righe ⛁ (quelle salvate dal vault)".into();
+                return;
+            }
+            None => return,
+        };
+        match crate::vault::restore(&self.base, &s) {
+            Ok(p) => {
+                let cmd = if s.is_codex() { "codex resume" } else { "claude --resume" };
+                self.status = format!("✓ rimessa a posto ({}) — ora  {cmd}  la ritrova", clip(&p.to_string_lossy(), 40));
+                // It is a normal session again: rescan so the row loses its ⛁
+                // and becomes resumable in place.
+                self.rescan_now();
+            }
+            Err(e) => self.status = format!("✗ ripristino fallito: {e}"),
+        }
     }
     /// Copy the selected session's transcript path to the system clipboard.
     fn copy_session_path(&mut self) {
@@ -2288,6 +2317,7 @@ fn dispatch(app: &mut App, code: u16) -> bool {
         A_COPYPATH => { if app.tab == 0 && app.selected().is_some() { app.copy_session_path(); } }
         A_ARCHIVE => { if app.tab == 0 && app.selected().is_some() { app.request_archive_project(); } }
         A_FLEET => app.start_fleet_fetch(),
+        A_VAULT_RESTORE => app.restore_from_vault(),
         A_HELP => { app.help = true; app.help_scroll = 0; }
         A_TAB => app.tab = (app.tab + 1) % 3,
         A_PIXEL => { app.pixel = !app.pixel; app.status = if app.pixel { "pixel ON".into() } else { "pixel OFF".into() }; }
@@ -2499,6 +2529,7 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
         KeyCode::Char('y') => { if app.tab == 0 && app.selected().is_some() { app.copy_session_path(); } }
         KeyCode::Char('H') => { if app.tab == 0 && app.selected().is_some() { app.request_archive_project(); } }
         KeyCode::Char('F') => app.start_fleet_fetch(),
+        KeyCode::Char('V') => { if app.tab == 0 && app.selected().is_some() { app.restore_from_vault(); } }
         KeyCode::Char('X') => { if app.tab == 0 { app.request_delete_marked(); } }
         KeyCode::Esc => { if !app.marked.is_empty() { app.marked.clear(); app.status = "selezione azzerata".into(); } }
         KeyCode::Char('g') => app.open_gsearch(),
@@ -3235,6 +3266,9 @@ fn render_sessions(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
                 // Rebuilt from history.jsonl: prompts only, no transcript behind it.
                 if s.is_ghost() { pre.push_str("⚱ "); }
                 if s.is_codex() { pre.push_str("◆ "); }
+                // Il transcript vive solo come hard link nel vault: il suo
+                // agente non lo vede più, Phosphor sì.
+                if s.is_vaulted() { pre.push_str("⛁ "); }
                 if s.is_continuation && meta.depth == 0 && meta.children == 0 { pre.push_str("↳ "); }
                 // A COLLAPSED head stands for the whole conversation, so it shows
                 // the chain ROOT (original) title — not the latest "resume" greeting.
@@ -3695,7 +3729,9 @@ fn render_detail(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         } else {
             "Claude Code".to_string()
         }),
-        kv("origine", if s.is_ghost() {
+        kv("origine", if s.is_vaulted() {
+            "⛁ NEL VAULT — il magazzino del suo agente non ce l'ha più, ma il transcript è intero (hard link). Premi  V  per rimetterlo al suo posto e tornare a riprenderlo.".into()
+        } else if s.is_ghost() {
             "⚱ RECUPERATA da history.jsonl — Claude Code ha cancellato il transcript (cleanupPeriodDays). Solo i tuoi prompt: niente risposte, token o costi.".into()
         } else {
             "transcript su disco".to_string()
@@ -3817,6 +3853,7 @@ fn render_help(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         item("↳", "sessione ripresa o da /compact (continua la precedente)"),
         item("★ · 📝 · ◉", "preferito  ·  ha una nota  ·  selezionata (multi-select)"),
         item("◆", "sessione Codex (~/.codex/sessions) invece che Claude Code: nome del progetto in un altro colore, riprende con  codex resume . Filtro:  agent:codex . Token e costo sono quelli di OpenAI (prezzi \"gpt\" in phosphor.json)."),
+        item("⛁", "salvata dal vault: il suo agente ha cancellato il transcript, che però sopravvive come hard link in ~/.claude/phosphor-vault. È completa — token, conversazione, tutto — e  V  la rimette al suo posto, tornando riprendibile. Si accende con  phosphor vault on  (spento di default: è l'unica cosa che scrive su disco)."),
         item("⚱", "recuperata da history.jsonl: il transcript l'ha cancellato Claude Code (cleanupPeriodDays, 30 giorni di default). Restano i prompt; niente risposte, token, costo o riprendi. Alza cleanupPeriodDays in ~/.claude/settings.json per non perderne altre."),
         item("● ◐ ·", "stato:  ● attiva   ◐ in pausa (idle)   · conclusa"),
         item("⏎", "tasto Invio (apre il dettaglio della sessione)"),
@@ -3846,6 +3883,7 @@ fn render_help(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         item("r  ·  e", "riprendi (claude --resume)  ·  export CSV/JSON"),
         item("x  ·  i", "esporta bundle .phx  ·  importa (selettore file + conferma)"),
         item("H", "ARCHIVIA il progetto (lo nasconde in archived/, reversibile) — ripristina da CLI"),
+        item("V", "RIPRISTINA dal vault: rimette il transcript nel magazzino del suo agente (solo righe ⛁)"),
         item("F", "FLOTTA: interroga i tuoi altri PC via ssh e unisce le loro sessioni [alias]"),
         item("", "  (configura con:  phosphor remote add <alias-ssh> · su remoto: r riprende LÀ)"),
         item("D", "CANCELLA il progetto della sessione (doppia conferma: riscrivi il nome; offre backup .phx)"),

@@ -85,6 +85,10 @@ COMANDI
   watch             monitor live: notifica i cambi di stato (Ctrl+C esce)
   clean             uso disco e sessioni vuote (non elimina senza conferma)
   archived          elenca i progetti archiviati (vedi --archive-project)
+  vault [on|off]    magazzino anti-cancellazione: hard link dei transcript in
+                    ~/.claude/phosphor-vault (0 byte in piu'). Senza argomenti
+                    mostra lo stato;  vault restore <id>  rimette a posto una
+                    sessione che l'agente ha cancellato
   export-all        impacchetta le sessioni (con transcript + sottocartelle) in
                     UN file portabile .phx, per spostarle su un altro PC
   import <file.phx> aggiunge le sessioni di un bundle a questo PC (mai sovrascrive,
@@ -463,6 +467,81 @@ fn do_delete_project(base: &std::path::Path, sessions: &[Session], name: &str) {
     }
 }
 
+/// `phosphor vault [status|on|off|restore <id>]` — the hard-link vault that
+/// keeps transcripts alive after an agent (or a disk cleaner) deletes them.
+/// See `phosphor::vault`.
+fn do_vault_cmd(base: &std::path::Path, verb: &str, arg: Option<&str>) {
+    let mut cfg = config::load(base);
+    match verb {
+        "on" | "off" => {
+            cfg.vault = verb == "on";
+            config::save(base, &cfg);
+            if cfg.vault {
+                // Scan once with the flag already saved: scan_all does the
+                // linking itself, so this protects what is on disk NOW instead
+                // of only what arrives later.
+                let mut cache = cache::load(base);
+                let (sessions, _) = phosphor::scan_all(base, &mut cache);
+                let failed = phosphor::vault::link_all(base, &sessions).1;
+                let (n, bytes, _, _) = phosphor::vault::stats(base);
+                println!("Vault ACCESO — {}", phosphor::vault::dir(base).display());
+                println!(
+                    "  {n} transcript al sicuro ({:.1} MB di conversazioni) per 0 byte in piu': sono hard link.",
+                    bytes as f64 / 1_048_576.0
+                );
+                if failed > 0 {
+                    println!("  ⚠ {failed} non collegabili: gli hard link non attraversano i volumi.");
+                    println!("    (succede se CODEX_HOME sta su un altro disco rispetto a ~/.claude)");
+                }
+                println!("  Da ora ogni scansione collega i nuovi. Quando un agente cancella un");
+                println!("  transcript, Phosphor continua a mostrarlo: ⛁ in lista, R per rimetterlo a posto.");
+            } else {
+                println!("Vault SPENTO: non collego piu' nulla.");
+                println!("  Quello gia' nel vault resta dov'e' — {}", phosphor::vault::dir(base).display());
+                println!("  Cancella quella cartella a mano per liberare lo spazio degli orfani.");
+            }
+        }
+        "restore" => {
+            let id = match arg {
+                Some(x) if !x.is_empty() => x,
+                _ => {
+                    eprintln!("Uso: phosphor vault restore <id-sessione>");
+                    return;
+                }
+            };
+            let mut cache = cache::load(base);
+            let (sessions, _) = phosphor::scan_all(base, &mut cache);
+            let hit = sessions.iter().find(|s| s.is_vaulted() && s.id.starts_with(id));
+            match hit {
+                None => eprintln!("Nessuna sessione nel vault con id che inizia per «{id}»."),
+                Some(s) => match phosphor::vault::restore(base, s) {
+                    Ok(p) => {
+                        println!("✓ rimessa a posto: {}", p.display());
+                        let cmd = if s.is_codex() { "codex resume" } else { "claude --resume" };
+                        println!("  ora e' riprendibile:  {cmd} {}", s.id);
+                    }
+                    Err(e) => eprintln!("✗ ripristino fallito: {e}"),
+                },
+            }
+        }
+        _ => {
+            let (n, bytes, orphans, obytes) = phosphor::vault::stats(base);
+            let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_048_576.0);
+            println!("Vault: {}", if cfg.vault { "ACCESO" } else { "spento" });
+            println!("  cartella   : {}", phosphor::vault::dir(base).display());
+            println!("  transcript : {n}  ({} in totale)", mb(bytes));
+            println!("  orfani     : {orphans}  ({})  <- i soli byte che paghi davvero", mb(obytes));
+            println!();
+            println!("Un hard link e' un secondo nome per gli stessi byte: finche' l'originale");
+            println!("esiste il vault non occupa nulla. Diventa proprietario solo di cio' che");
+            println!("qualcun altro ha cancellato, cioe' esattamente cio' che avresti perso.");
+            if !cfg.vault {
+                println!();
+                println!("  phosphor vault on    per accenderlo");
+            }
+        }
+    }
+}
 /// `phosphor clean --archive-project "<nome>"` — sposta un progetto in `archived/`
 /// (fuori da `projects/`): sparisce dalla lista e dai `--resume` di Claude ma NON
 /// viene distrutto (reversibile con `--unarchive-project`). Singola conferma.
@@ -1241,6 +1320,7 @@ fn main() {
     let mut archive_project: Option<String> = None;
     let mut unarchive_project: Option<String> = None;
     let mut archived_mode = false;
+    let mut vault_action: Option<(String, Option<String>)> = None;
     let mut export_mode = false;
     let mut import_path: Option<String> = None;
     let mut import_remaps: Vec<(String, String)> = Vec::new();
@@ -1297,6 +1377,22 @@ fn main() {
                 }
             }
             "archived" => archived_mode = true,
+            "vault" => {
+                let sub = args.get(i + 1).map(|s| s.as_str()).unwrap_or("status");
+                let known = matches!(sub, "on" | "off" | "status" | "restore");
+                let verb = if known { sub.to_string() } else { "status".to_string() };
+                let mut arg = None;
+                if known {
+                    i += 1;
+                    if sub == "restore" {
+                        arg = args.get(i + 1).cloned();
+                        if arg.is_some() {
+                            i += 1;
+                        }
+                    }
+                }
+                vault_action = Some((verb, arg));
+            }
             "export-all" | "export" => export_mode = true,
             "sync" => {
                 let sub = args.get(i + 1).map(|s| s.as_str()).unwrap_or("status");
@@ -1432,6 +1528,10 @@ fn main() {
     // the scanned `projects/`), so it runs before the "projects must exist" guard.
     if archived_mode {
         do_archived_list(&base);
+        return;
+    }
+    if let Some((verb, arg)) = &vault_action {
+        do_vault_cmd(&base, verb, arg.as_deref());
         return;
     }
     if let Some(name) = &unarchive_project {

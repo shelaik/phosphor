@@ -86,6 +86,16 @@ impl Session {
         self.path.ends_with(crate::recover::GHOST_EXT)
     }
 
+    /// True for a session read out of the vault (`crate::vault`) because its
+    /// transcript no longer exists in its agent's store. The file is real and
+    /// complete — unlike a ghost — but the agent cannot see it, so resuming
+    /// means restoring it first.
+    pub fn is_vaulted(&self) -> bool {
+        Path::new(&self.path)
+            .components()
+            .any(|c| c.as_os_str() == crate::vault::DIR)
+    }
+
     /// True for a session recorded by the Codex CLI rather than Claude Code.
     /// The two store transcripts in different trees, in different formats, and
     /// resume with different commands — so anything that touches the file or
@@ -250,7 +260,7 @@ pub fn scan_incremental(
     // The cache map is SHARED with the Codex scanner (`crate::codex`), which
     // owns its own keys: count and evict only the rows this scanner produced,
     // or every pass would look changed and thrash the file.
-    let removed = cache.values().filter(|v| !v.is_codex()).count() != reused.len();
+    let removed = cache.values().filter(|v| !v.is_codex() && !v.is_vaulted()).count() != reused.len();
     let changed = !to_parse.is_empty() || removed;
 
     // Parse the changed/new transcripts in parallel.
@@ -288,7 +298,7 @@ pub fn scan_incremental(
     for s in &parsed {
         cache.insert(s.path.clone(), s.clone());
     }
-    cache.retain(|k, v| valid.contains(k) || v.is_codex());
+    cache.retain(|k, v| valid.contains(k) || v.is_codex() || v.is_vaulted());
 
     let mut sessions = reused;
     sessions.extend(parsed);
