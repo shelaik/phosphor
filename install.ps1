@@ -1,4 +1,4 @@
-# Phosphor — installer leggero per Windows (PowerShell).
+﻿# Phosphor — installer leggero per Windows (PowerShell).
 #
 # Cosa fa: copia phosphor.exe (e, se presente, phosphor-adv.exe) in
 #   %LOCALAPPDATA%\Phosphor, crea un collegamento sul Desktop e aggiunge la

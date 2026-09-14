@@ -1,4 +1,4 @@
-# Phosphor — build di release "pulita" per la distribuzione.
+﻿# Phosphor — build di release "pulita" per la distribuzione.
 #
 # Perche': un binario Rust incorpora i path di compilazione (es. nei messaggi di
 # panic, file!()/module_path!()). Quei path contengono la HOME dell'utente che

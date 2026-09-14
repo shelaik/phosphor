@@ -2,3 +2,10 @@
 # in CRLF su Windows riscriverebbe altrimenti file interi e seppellirebbe la
 # modifica vera dentro un diff da migliaia di righe.
 * text=auto eol=lf
+
+# Gli .ps1 vanno lasciati stare, byte per byte: devono restare UTF-8 CON BOM.
+# Windows PowerShell 5.1 legge come ANSI un file senza BOM, e basta un trattino
+# lungo dentro un commento perche' il commento sbordi e lo script non si compili
+# piu'. I fine riga invece non contano. install.ps1 e' un asset di release che
+# la gente lancia col tasto destro (quindi con 5.1, non con pwsh 7): deve partire.
+*.ps1 -text

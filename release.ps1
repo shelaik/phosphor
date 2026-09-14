@@ -1,4 +1,4 @@
-# Phosphor — pubblica una release GitHub SEMPRE allineata a Cargo.toml.
+﻿# Phosphor — pubblica una release GitHub SEMPRE allineata a Cargo.toml.
 #
 # Il numero di versione viene preso da Cargo.toml (unica fonte di verità: il
 # binario lo eredita via env!("CARGO_PKG_VERSION")). Lo script:
