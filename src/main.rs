@@ -85,6 +85,8 @@ COMANDI
   watch             monitor live: notifica i cambi di stato (Ctrl+C esce)
   clean             uso disco e sessioni vuote (non elimina senza conferma)
   archived          elenca i progetti archiviati (vedi --archive-project)
+  retention [giorni] mostra (e alza) ogni quanto Claude Code cancella i suoi
+                    transcript: di default dopo 30 giorni, senza cestino
   vault [on|off]    magazzino anti-cancellazione: hard link dei transcript in
                     ~/.claude/phosphor-vault (0 byte in piu'). Senza argomenti
                     mostra lo stato;  vault restore <id>  rimette a posto una
@@ -464,6 +466,53 @@ fn do_delete_project(base: &std::path::Path, sessions: &[Session], name: &str) {
     match phosphor::delete_project_dir(base, &dir) {
         Ok(()) => println!("✓ Progetto «{name}» cancellato: {} sessioni, {} liberati.", subset.len(), mb(bytes)),
         Err(e) => eprintln!("✗ Cancellazione fallita: {e}"),
+    }
+}
+
+/// `phosphor retention [<giorni>]` — read, and optionally raise, the setting
+/// that decides how long Claude Code keeps its own transcripts. See
+/// `phosphor::retention`.
+fn do_retention_cmd(base: &std::path::Path, arg: Option<&str>) {
+    use phosphor::retention as ret;
+    match arg {
+        None => {
+            println!("{}", ret::summary(base));
+            println!("  file       : {}", ret::settings_path(base).display());
+            println!("  in vigore  : {} giorni", ret::effective(base));
+            if ret::at_risk(base) {
+                println!();
+                println!("⚠ Claude Code cancella da solo i transcript piu' vecchi di cosi', all'avvio.");
+                println!("  Niente cestino, niente backup: un progetto fermo da un mese sparisce.");
+                println!();
+                println!("  phosphor retention {}    per tenerli 10 anni", ret::RECOMMENDED_DAYS);
+                println!("  phosphor retention 365     per tenerli un anno");
+            }
+            println!();
+            println!("Codex non ha un'impostazione equivalente: non pota per data, tiene tutto.");
+            println!("Contro TUTTO il resto (pulitori disco, sync, cancellazioni a mano):");
+            println!("  phosphor vault on");
+        }
+        Some(a) => {
+            let days: u64 = match a.parse() {
+                Ok(d) => d,
+                Err(_) => {
+                    eprintln!("Uso: phosphor retention [<giorni>]   (es. phosphor retention 3650)");
+                    return;
+                }
+            };
+            let before = ret::effective(base);
+            match ret::set(base, days) {
+                Ok(p) => {
+                    println!("✓ cleanupPeriodDays: {before} -> {days} giorni");
+                    println!("  {}", p.display());
+                    println!("  copia del precedente in settings.json.phosphor-bak");
+                    println!();
+                    println!("Vale da qui in avanti. Quello gia' cancellato non torna:");
+                    println!("Phosphor lo ricostruisce come puo' dai prompt (righe ⚱).");
+                }
+                Err(e) => eprintln!("✗ non ho modificato settings.json: {e}"),
+            }
+        }
     }
 }
 
@@ -1321,6 +1370,7 @@ fn main() {
     let mut unarchive_project: Option<String> = None;
     let mut archived_mode = false;
     let mut vault_action: Option<(String, Option<String>)> = None;
+    let mut retention_action: Option<Option<String>> = None;
     let mut export_mode = false;
     let mut import_path: Option<String> = None;
     let mut import_remaps: Vec<(String, String)> = Vec::new();
@@ -1377,6 +1427,13 @@ fn main() {
                 }
             }
             "archived" => archived_mode = true,
+            "retention" | "retenzione" => {
+                let n = args.get(i + 1).cloned().filter(|x| x.parse::<u64>().is_ok());
+                if n.is_some() {
+                    i += 1;
+                }
+                retention_action = Some(n);
+            }
             "vault" => {
                 let sub = args.get(i + 1).map(|s| s.as_str()).unwrap_or("status");
                 let known = matches!(sub, "on" | "off" | "status" | "restore");
@@ -1532,6 +1589,10 @@ fn main() {
     }
     if let Some((verb, arg)) = &vault_action {
         do_vault_cmd(&base, verb, arg.as_deref());
+        return;
+    }
+    if let Some(arg) = &retention_action {
+        do_retention_cmd(&base, arg.as_deref());
         return;
     }
     if let Some(name) = &unarchive_project {

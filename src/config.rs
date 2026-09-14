@@ -81,10 +81,13 @@ pub struct Config {
     /// A link costs no extra bytes, so the only real cost is the transcripts
     /// that would have been deleted.
     pub vault: bool,
+    /// La domanda sulla retention di Claude Code e' gia' stata posta una volta.
+    /// Serve solo a non ripeterla: la risposta vera vive in settings.json.
+    pub retention_asked: bool,
 }
 impl Default for Config {
     fn default() -> Self {
-        Config { prices: Prices::default(), theme: "fosfori".into(), watch: 5, pixel: false, budget: 0.0, path_remaps: Vec::new(), sync_repo: String::new(), sync_encrypt: String::new(), sync_identity: String::new(), favorites: Vec::new(), notes: Vec::new(), aliases: Vec::new(), remotes: Vec::new(), energy_wh_per_token: 0.0005, water_ml_per_token: 0.0005, vault: false }
+        Config { prices: Prices::default(), theme: "fosfori".into(), watch: 5, pixel: false, budget: 0.0, path_remaps: Vec::new(), sync_repo: String::new(), sync_encrypt: String::new(), sync_identity: String::new(), favorites: Vec::new(), notes: Vec::new(), aliases: Vec::new(), remotes: Vec::new(), energy_wh_per_token: 0.0005, water_ml_per_token: 0.0005, vault: false, retention_asked: false }
     }
 }
 
@@ -203,6 +206,7 @@ fn parse(buf: &[u8], c: &mut Config) {
             "energyWhPerToken" => c.energy_wh_per_token = p.take_number().max(0.0),
             "waterMlPerToken" => c.water_ml_per_token = p.take_number().max(0.0),
             "vault" => c.vault = p.take_bool(),
+            "retentionAsked" => c.retention_asked = p.take_bool(),
             "syncEncrypt" => {
                 if let Some(v) = p.take_string() {
                     c.sync_encrypt = v;
@@ -370,7 +374,7 @@ pub fn save(base: &Path, c: &Config) {
         .collect::<Vec<_>>()
         .join(",\n");
     let txt = format!(
-        "{{\n  \"theme\": \"{}\",\n  \"pixel\": {},\n  \"watch\": {},\n  \"budget\": {},\n  \"energyWhPerToken\": {},\n  \"waterMlPerToken\": {},\n  \"vault\": {},\n  \"syncRepo\": \"{}\",\n  \"syncEncrypt\": \"{}\",\n  \"syncIdentity\": \"{}\",\n  \"favorites\": [{}],\n  \"remotes\": [{}],\n  \"notes\": {{{}}},\n  \"aliases\": {{{}}},\n  \"pathRemaps\": {{{}}},\n  \"prices\": {{\n    \"opus\":    {},\n    \"sonnet\":  {},\n    \"haiku\":   {},\n    \"gpt\":     {},\n    \"default\": {}\n  }}\n}}\n",
+        "{{\n  \"theme\": \"{}\",\n  \"pixel\": {},\n  \"watch\": {},\n  \"budget\": {},\n  \"energyWhPerToken\": {},\n  \"waterMlPerToken\": {},\n  \"vault\": {},\n  \"retentionAsked\": {},\n  \"syncRepo\": \"{}\",\n  \"syncEncrypt\": \"{}\",\n  \"syncIdentity\": \"{}\",\n  \"favorites\": [{}],\n  \"remotes\": [{}],\n  \"notes\": {{{}}},\n  \"aliases\": {{{}}},\n  \"pathRemaps\": {{{}}},\n  \"prices\": {{\n    \"opus\":    {},\n    \"sonnet\":  {},\n    \"haiku\":   {},\n    \"gpt\":     {},\n    \"default\": {}\n  }}\n}}\n",
         crate::json::escape(&c.theme),
         c.pixel,
         c.watch,
@@ -378,6 +382,7 @@ pub fn save(base: &Path, c: &Config) {
         c.energy_wh_per_token,
         c.water_ml_per_token,
         c.vault,
+        c.retention_asked,
         crate::json::escape(&c.sync_repo),
         crate::json::escape(&c.sync_encrypt),
         crate::json::escape(&c.sync_identity),

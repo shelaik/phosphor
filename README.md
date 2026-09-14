@@ -80,6 +80,7 @@ on your PATH. To compile from source, see [Build](#build-from-source).
 | `resume-here <id>` | resume a session in the CURRENT terminal (used by fleet over ssh) |
 | `sync set <dir>` | configure a local git repo (private) for bundle sync |
 | `sync push` / `pull` | send this PC's bundle / import other PCs' bundles via git |
+| `retention [<days>]` | show — and raise — how long Claude Code keeps its own transcripts (30 days by default) |
 | `vault [on\|off]` | hard-link vault that keeps transcripts alive after deletion (0 extra bytes); no args = status; `vault restore <id>` puts one back |
 
 ## Options
@@ -165,11 +166,28 @@ Phosphor because there is nothing left on disk to scan. Only the top-level
 transcripts go — the `subagents/` and `memory/` subfolders stay behind, which is
 why an "empty" project folder can still hold gigabytes.
 
-To keep everything, raise the limit in `~/.claude/settings.json`:
+Phosphor asks you about this **on first launch**, because the setting is
+invisible until it has already cost you something: one key picks ten years, one
+picks a year, one dismisses it for good. It changes that single number and keeps
+a copy of the file as `settings.json.phosphor-bak` — every other setting of
+yours is left byte for byte as it was.
+
+From the command line:
+
+```
+phosphor retention          # what is in force, and what it means
+phosphor retention 3650     # keep ten years of history
+```
+
+Or by hand in `~/.claude/settings.json`:
 
 ```json
 { "cleanupPeriodDays": 3650 }
 ```
+
+**Codex has no equivalent.** Its rollouts are filed by date and never pruned on
+a timer — checked against a real store whose oldest thread was six months old
+and untouched. Nothing to set there; what protects it is the vault below.
 
 Do that BEFORE you rely on Phosphor for history. What is already deleted cannot
 be restored; the `⚱` recovery above is a skeleton rebuilt from the prompt

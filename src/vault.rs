@@ -284,16 +284,18 @@ pub fn restore(base: &Path, s: &Session) -> io::Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
     use super::*;
 
     fn tmp() -> PathBuf {
         let p = std::env::temp_dir().join(format!(
             "phosphor-vault-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            // Il solo orologio non basta: su Windows ha una risoluzione di ~15 ms
+            // e i test girano in parallelo, quindi due cartelle possono nascere
+            // con lo stesso nome e cancellarsi a vicenda a meta' corsa.
+            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&p).unwrap();
         p

@@ -836,16 +836,18 @@ pub fn open_threads(home: &Path) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
     use super::*;
 
     fn tmp() -> PathBuf {
         let p = std::env::temp_dir().join(format!(
             "phosphor-codex-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            // Il solo orologio non basta: su Windows ha una risoluzione di ~15 ms
+            // e i test girano in parallelo, quindi due cartelle possono nascere
+            // con lo stesso nome e cancellarsi a vicenda a meta' corsa.
+            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir_all(p.join("sessions").join("2026").join("09").join("04")).unwrap();
         p

@@ -662,6 +662,9 @@ struct Picker {
 enum Pending {
     Export { csv: PathBuf, json: PathBuf },
     Resume { id: String, cwd: String, fork: bool, codex: bool },
+    /// Alza cleanupPeriodDays di Claude Code. $days = 0 significa "lascia
+    /// com'e'": non tocca nulla, ma smette di chiedere.
+    SetRetention { days: u64 },
     ExportBundle { out: PathBuf },
     ImportBundle { src: PathBuf },
     ArchiveProject { dir: PathBuf, name: String },
@@ -675,6 +678,11 @@ struct Confirm {
     title: String,
     lines: Vec<String>,
     action: Pending,
+    /// Risposte alternative a tasto singolo, oltre al solito sì/no:
+    /// `(tasto, azione)`. Servono a far scegliere un VALORE invece di un
+    /// binario — la prima domanda che Phosphor fa all'utente è "per quanti
+    /// giorni?", e ridurla a sì/no la renderebbe un'altra domanda.
+    alts: Vec<(char, Pending)>,
 }
 
 /// The "delete an entire project" flow — the most destructive action in the app,
@@ -1051,7 +1059,7 @@ impl App {
             "Solo i transcript scelti (+ le loro sottocartelle),".into(),
             "confinati a projects/. Nessun altro file toccato.".into(),
         ];
-        self.confirm = Some(Confirm { title: " CONFERMA CANCELLA SELEZIONE ".into(), lines, action: Pending::DeleteMarked { paths } });
+        self.confirm = Some(Confirm { title: " CONFERMA CANCELLA SELEZIONE ".into(), lines, action: Pending::DeleteMarked { paths }, alts: Vec::new() });
     }
     /// Perform the bulk delete (already confirmed): remove each file confined to
     /// projects/, drop them from the view, clear the selection.
@@ -1120,6 +1128,73 @@ impl App {
         }
         self.status = format!("apro  {}", clip(&dir, 44));
     }
+    /// Ask, once, whether to stop Claude Code from deleting the history.
+    ///
+    /// Shown on the first run that finds a retention short enough to lose work
+    /// (see `crate::retention`). Answering either way is remembered, so the
+    /// question is asked once and never nags: the point is to make an invisible
+    /// setting visible at the one moment the user can act on it.
+    fn maybe_ask_retention(&mut self) {
+        if self.confirm.is_some() {
+            return;
+        }
+        let cfg = crate::config::load(&self.base);
+        if cfg.retention_asked || !crate::retention::at_risk(&self.base) {
+            return;
+        }
+        let days = crate::retention::effective(&self.base);
+        let lines = vec![
+            format!("Claude Code CANCELLA i transcript dopo {days} giorni."),
+            "Lo fa da solo all'avvio: niente cestino, niente backup.".into(),
+            "È il motivo per cui un progetto fermo da un mese sparisce da qui.".into(),
+            String::new(),
+            "Posso alzare  cleanupPeriodDays  in ~/.claude/settings.json.".into(),
+            "Cambio UN numero: le altre tue impostazioni restano intatte,".into(),
+            "e ne tengo una copia in settings.json.phosphor-bak.".into(),
+            String::new(),
+            "   1   10 anni  (3650 giorni) — consigliato".into(),
+            "   2   1 anno   (365 giorni)".into(),
+            "   3   lascia com'è, non chiedermelo più".into(),
+            String::new(),
+            "Quello che è già stato cancellato non torna. Per non perdere".into(),
+            "altro anche fuori da questa impostazione:  phosphor vault on".into(),
+        ];
+        self.confirm = Some(Confirm {
+            title: " LA TUA CRONOLOGIA SI STA CANCELLANDO ".into(),
+            lines,
+            // Enter/s = la scelta consigliata, così la via rapida è quella giusta.
+            action: Pending::SetRetention { days: crate::retention::RECOMMENDED_DAYS },
+            alts: vec![
+                ('1', Pending::SetRetention { days: crate::retention::RECOMMENDED_DAYS }),
+                ('2', Pending::SetRetention { days: 365 }),
+                ('3', Pending::SetRetention { days: 0 }),
+            ],
+        });
+    }
+
+    /// Apply the answer to [`maybe_ask_retention`]. `days == 0` means "leave it
+    /// alone" — nothing is written to Claude Code's settings, but the answer is
+    /// recorded so the question does not come back.
+    fn do_set_retention(&mut self, days: u64) {
+        if self.dry {
+            return;
+        }
+        let mut cfg = crate::config::load(&self.base);
+        cfg.retention_asked = true;
+        crate::config::save(&self.base, &cfg);
+        if days == 0 {
+            self.status = format!(
+                "lasciato com'è ({} giorni) — puoi cambiarlo con  phosphor retention <giorni>",
+                crate::retention::effective(&self.base)
+            );
+            return;
+        }
+        self.status = match crate::retention::set(&self.base, days) {
+            Ok(_) => format!("✓ Claude Code ora conserva i transcript {days} giorni"),
+            Err(e) => format!("✗ non ho potuto modificare settings.json: {e}"),
+        };
+    }
+
     /// Put the selected vaulted transcript back into its agent's store, so the
     /// agent can find and resume it again. Another hard link — nothing is
     /// copied and the vault keeps its own name for the same bytes — so this is
@@ -1187,7 +1262,7 @@ impl App {
             String::new(),
             format!("  {}  →  archived/", clip(&dir.display().to_string(), 52)),
         ];
-        self.confirm = Some(Confirm { title: " CONFERMA ARCHIVIA ".into(), lines, action: Pending::ArchiveProject { dir, name } });
+        self.confirm = Some(Confirm { title: " CONFERMA ARCHIVIA ".into(), lines, action: Pending::ArchiveProject { dir, name }, alts: Vec::new() });
     }
     /// Perform the archive (already confirmed), then drop the project's sessions
     /// from the live view.
@@ -1345,7 +1420,7 @@ impl App {
             String::new(),
             "Nome con data/ora: nessun file esistente verrà sovrascritto.".into(),
         ];
-        self.confirm = Some(Confirm { title: " CONFERMA EXPORT ".into(), lines, action: Pending::Export { csv, json } });
+        self.confirm = Some(Confirm { title: " CONFERMA EXPORT ".into(), lines, action: Pending::Export { csv, json }, alts: Vec::new() });
     }
     /// Actually write the export to the (already confirmed) paths.
     fn do_export(&mut self, csv_path: PathBuf, json_path: PathBuf) {
@@ -1428,7 +1503,7 @@ impl App {
                     "claude riprenderà LÀ, nella cartella giusta di quel PC.".into(),
                     "(serve phosphor+claude installati e ssh raggiungibile)".into(),
                 ];
-                self.confirm = Some(Confirm { title: " CONFERMA RIPRENDI REMOTO ".into(), lines, action: Pending::RemoteResume { host, id } });
+                self.confirm = Some(Confirm { title: " CONFERMA RIPRENDI REMOTO ".into(), lines, action: Pending::RemoteResume { host, id }, alts: Vec::new() });
                 return;
             }
         }
@@ -1477,7 +1552,7 @@ impl App {
                 "remap applicato → uso --fork-session (sessione derivata).".to_string()
             });
         }
-        self.confirm = Some(Confirm { title: " CONFERMA RIPRENDI ".into(), lines, action: Pending::Resume { id, cwd, fork, codex } });
+        self.confirm = Some(Confirm { title: " CONFERMA RIPRENDI ".into(), lines, action: Pending::Resume { id, cwd, fork, codex }, alts: Vec::new() });
     }
     /// Actually spawn the resume terminal (already confirmed).
     fn do_resume_now(&mut self, id: String, cwd: String, fork: bool, codex: bool) {
@@ -1514,7 +1589,7 @@ impl App {
             String::new(),
             "File NUOVO con data nel nome: non sovrascrive nulla.".into(),
         ];
-        self.confirm = Some(Confirm { title: " CONFERMA EXPORT PORTABILE ".into(), lines, action: Pending::ExportBundle { out } });
+        self.confirm = Some(Confirm { title: " CONFERMA EXPORT PORTABILE ".into(), lines, action: Pending::ExportBundle { out }, alts: Vec::new() });
     }
     /// Actually build and write the bundle (already confirmed). With a
     /// multi-selection active it bundles just those; else the whole current view.
@@ -1847,7 +1922,7 @@ impl App {
         }
         lines.push(String::new());
         lines.push("Solo aggiunta: non sovrascrive, non modifica, non elimina.".into());
-        self.confirm = Some(Confirm { title: " CONFERMA IMPORT ".into(), lines, action: Pending::ImportBundle { src } });
+        self.confirm = Some(Confirm { title: " CONFERMA IMPORT ".into(), lines, action: Pending::ImportBundle { src }, alts: Vec::new() });
     }
     /// Actually import the bundle (already confirmed).
     fn do_import_bundle(&mut self, src: PathBuf) {
@@ -1864,6 +1939,7 @@ impl App {
         match action {
             Pending::Export { csv, json } => self.do_export(csv, json),
             Pending::Resume { id, cwd, fork, codex } => self.do_resume_now(id, cwd, fork, codex),
+            Pending::SetRetention { days } => self.do_set_retention(days),
             Pending::ExportBundle { out } => self.do_export_bundle(out),
             Pending::ImportBundle { src } => self.do_import_bundle(src),
             Pending::ArchiveProject { dir, name } => self.do_archive_now(dir, name),
@@ -1986,16 +2062,17 @@ pub fn selftest(base: PathBuf, all: Vec<Session>, cache: Arc<Mutex<HashMap<Strin
                 title: " CONFERMA EXPORT ".into(),
                 lines: vec!["riga di prova".into(), "C:/un/percorso/molto/lungo/file.csv".into()],
                 action: Pending::Export { csv: PathBuf::from("x.csv"), json: PathBuf::from("x.json") },
+                alts: Vec::new(),
             });
             term.draw(|f| ui(f, &mut app)).expect("draw confirm");
             for r in 0..sz.1 { for c in (0..sz.0).step_by(3) { let _ = handle_mouse(&mut app, mk_click(c, r)); } }
-            app.confirm = Some(Confirm { title: " C ".into(), lines: vec![], action: Pending::Resume { id: "0".into(), cwd: "C:/Windows".into(), fork: false, codex: false } });
+            app.confirm = Some(Confirm { title: " C ".into(), lines: vec![], action: Pending::Resume { id: "0".into(), cwd: "C:/Windows".into(), fork: false, codex: false }, alts: Vec::new() });
             let _ = handle_key(&mut app, KeyCode::Esc, KeyModifiers::empty());
             // portable bundle export + import confirm modals (dry: no I/O)
-            app.confirm = Some(Confirm { title: " EXP ".into(), lines: vec!["bundle".into()], action: Pending::ExportBundle { out: PathBuf::from("x.phx") } });
+            app.confirm = Some(Confirm { title: " EXP ".into(), lines: vec!["bundle".into()], action: Pending::ExportBundle { out: PathBuf::from("x.phx") }, alts: Vec::new() });
             term.draw(|f| ui(f, &mut app)).expect("draw expbundle");
             let _ = handle_key(&mut app, KeyCode::Enter, KeyModifiers::empty());
-            app.confirm = Some(Confirm { title: " IMP ".into(), lines: vec!["import".into()], action: Pending::ImportBundle { src: PathBuf::from("x.phx") } });
+            app.confirm = Some(Confirm { title: " IMP ".into(), lines: vec!["import".into()], action: Pending::ImportBundle { src: PathBuf::from("x.phx") }, alts: Vec::new() });
             term.draw(|f| ui(f, &mut app)).expect("draw import");
             let _ = handle_key(&mut app, KeyCode::Esc, KeyModifiers::empty());
             // request_* paths (dry mode short-circuits before any disk access)
@@ -2238,6 +2315,9 @@ pub fn run(
     );
     let mut app = App::new(base, cache, prices, budget, remaps, sync_repo, watch, theme_idx, pixel, all);
     app.fleet_tx = Some(ftx);
+    // Prima cosa che si vede, se serve: la retention di Claude Code sta
+    // cancellando la cronologia che l'utente e' appena venuto a guardare.
+    app.maybe_ask_retention();
     let mut last_blink = Instant::now();
     let res = (|| -> std::io::Result<()> {
         loop {
@@ -2330,6 +2410,21 @@ fn dispatch(app: &mut App, code: u16) -> bool {
 fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
     // A pending confirmation captures all input until answered.
     if app.confirm.is_some() {
+        // An alternative answer (a value instead of yes/no) wins over the
+        // default keys, so a confirmation that offers choices can bind any
+        // character it likes.
+        if let KeyCode::Char(ch) = code {
+            let alt = app
+                .confirm
+                .as_ref()
+                .and_then(|c| c.alts.iter().position(|(k, _)| *k == ch));
+            if let Some(i) = alt {
+                if let Some(mut c) = app.confirm.take() {
+                    app.run_pending(c.alts.remove(i).1);
+                }
+                return false;
+            }
+        }
         match code {
             KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                 if let Some(c) = app.confirm.take() { app.run_pending(c.action); }
@@ -3853,6 +3948,7 @@ fn render_help(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         item("↳", "sessione ripresa o da /compact (continua la precedente)"),
         item("★ · 📝 · ◉", "preferito  ·  ha una nota  ·  selezionata (multi-select)"),
         item("◆", "sessione Codex (~/.codex/sessions) invece che Claude Code: nome del progetto in un altro colore, riprende con  codex resume . Filtro:  agent:codex . Token e costo sono quelli di OpenAI (prezzi \"gpt\" in phosphor.json)."),
+        item("⚠ cronologia", "Claude Code cancella i suoi transcript dopo  cleanupPeriodDays  giorni — 30 di default, all'avvio, senza cestino: è così che spariscono i progetti fermi da un mese. Phosphor te lo chiede al primo avvio; puoi anche farlo da riga di comando con  phosphor retention 3650  (cambia solo quel numero in ~/.claude/settings.json e tiene una copia del file). Codex non ha nulla di simile: non pota per data. Contro tutto il resto — pulitori disco, sync, cancellazioni a mano — serve  phosphor vault on ."),
         item("⛁", "salvata dal vault: il suo agente ha cancellato il transcript, che però sopravvive come hard link in ~/.claude/phosphor-vault. È completa — token, conversazione, tutto — e  V  la rimette al suo posto, tornando riprendibile. Si accende con  phosphor vault on  (spento di default: è l'unica cosa che scrive su disco)."),
         item("⚱", "recuperata da history.jsonl: il transcript l'ha cancellato Claude Code (cleanupPeriodDays, 30 giorni di default). Restano i prompt; niente risposte, token, costo o riprendi. Alza cleanupPeriodDays in ~/.claude/settings.json per non perderne altre."),
         item("● ◐ ·", "stato:  ● attiva   ◐ in pausa (idle)   · conclusa"),
@@ -4225,6 +4321,49 @@ mod tree_tests {
         // both rows visible as independent heads (no [+] chain folding)
         assert_eq!(app.view.len(), 2, "remote row is its own head, not a hidden child");
         assert!(app.row_meta.iter().all(|m| m.children == 0), "no cross-host chains");
+    }
+
+    #[test]
+    fn the_retention_question_appears_only_when_it_should() {
+        // Una base tutta sua: la domanda dipende da settings.json, non dalle sessioni.
+        let base = std::env::temp_dir().join(format!(
+            "phosphor-tui-ret-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        let mk = |base: &std::path::Path| {
+            let cache = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+            let mut a = App::new(base.to_path_buf(), cache, Prices::default(), 0.0, Vec::new(), String::new(), 5, 0, false, Vec::new());
+            a.dry = true;
+            a
+        };
+
+        // chiave assente = 30 giorni = si chiede
+        std::fs::write(base.join("settings.json"), "{\n  \"model\": \"opus\"\n}\n").unwrap();
+        let mut a = mk(&base);
+        a.maybe_ask_retention();
+        let c = a.confirm.as_ref().expect("la domanda deve comparire");
+        assert_eq!(c.alts.len(), 3, "tre scelte: 10 anni, 1 anno, lascia stare");
+        // Invio / s prende la consigliata, non una a caso
+        assert!(matches!(c.action, Pending::SetRetention { days } if days == crate::retention::RECOMMENDED_DAYS));
+        assert!(matches!(c.alts[2], ('3', Pending::SetRetention { days: 0 })), "il terzo tasto non tocca nulla");
+
+        // retention gia' lunga = non si chiede
+        std::fs::write(base.join("settings.json"), "{\n  \"cleanupPeriodDays\": 3650\n}\n").unwrap();
+        let mut b = mk(&base);
+        b.maybe_ask_retention();
+        assert!(b.confirm.is_none(), "niente domanda se la cronologia e' gia' al sicuro");
+
+        // gia' risposto una volta = non si chiede piu', anche se e' corta
+        std::fs::write(base.join("settings.json"), "{\n  \"cleanupPeriodDays\": 30\n}\n").unwrap();
+        let mut cfg = crate::config::Config::default();
+        cfg.retention_asked = true;
+        crate::config::save(&base, &cfg);
+        let mut c2 = mk(&base);
+        c2.maybe_ask_retention();
+        assert!(c2.confirm.is_none(), "chiesto una volta, mai piu'");
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]

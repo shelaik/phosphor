@@ -11,6 +11,7 @@ pub mod live;
 pub mod mcp;
 pub mod plan;
 pub mod recover;
+pub mod retention;
 pub mod scan;
 pub mod server;
 pub mod tui;
@@ -32,13 +33,13 @@ pub const GIT_DIRTY: &str = env!("PHOSPHOR_GIT_DIRTY");
 /// Commit date (YYYY-MM-DD) the binary was built from, or "" when unknown.
 pub const COMMIT_DATE: &str = env!("PHOSPHOR_COMMIT_DATE");
 
-/// A PRECISE one-line build identity, e.g. `v0.3.0 Â· ga1b2c3d4e Â· 2026-06-24`.
-/// Lets the running exe report exactly which source revision it came from â€”
+/// A PRECISE one-line build identity, e.g. `v0.3.0 · ga1b2c3d4e · 2026-06-24`.
+/// Lets the running exe report exactly which source revision it came from —
 /// `+` after the hash means it was built from an uncommitted (dirty) tree.
 pub fn version_line() -> String {
-    let mut s = format!("v{} Â· g{}{}", VERSION, GIT_HASH, GIT_DIRTY);
+    let mut s = format!("v{} · g{}{}", VERSION, GIT_HASH, GIT_DIRTY);
     if !COMMIT_DATE.is_empty() {
-        s.push_str(" Â· ");
+        s.push_str(" · ");
         s.push_str(COMMIT_DATE);
     }
     s
@@ -52,7 +53,7 @@ pub fn default_base() -> PathBuf {
     PathBuf::from(home).join(".claude")
 }
 
-/// Write `data` to `path` only if it does not already exist â€” never overwrites.
+/// Write `data` to `path` only if it does not already exist — never overwrites.
 /// Returns an error (AlreadyExists) instead of clobbering an existing file.
 pub fn write_new(path: &Path, data: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
@@ -153,7 +154,7 @@ pub fn grep_of(base: &Path, s: &scan::Session, needle_lower: &str, max: usize) -
 /// `history.jsonl`, and re-sort newest-first.
 ///
 /// ALWAYS call this AFTER `cache::save`: a recovered session has no file behind
-/// it, so it must never enter the on-disk cache â€” it would never be evicted
+/// it, so it must never enter the on-disk cache — it would never be evicted
 /// (the cache drops entries whose transcript vanished, and a ghost's never
 /// existed) and would make every scan report itself as "changed". Rebuilding it
 /// costs one pass over `history.jsonl` instead.
@@ -166,7 +167,7 @@ pub fn add_recovered(base: &Path, sessions: &mut Vec<scan::Session>) {
     sessions.sort_by(|a, b| b.mtime_ms.cmp(&a.mtime_ms));
 }
 
-/// Resume a Claude Code session in a fresh terminal â€” safely.
+/// Resume a Claude Code session in a fresh terminal — safely.
 /// Hardened against command injection: the id must be UUID-shaped, the cwd must
 /// be a real existing directory free of quote/control chars, and the directory
 /// is set via `current_dir` (OS-handled) rather than interpolated into a
@@ -184,8 +185,8 @@ pub fn resume_session_fork(cwd: &str, id: &str) -> bool {
 
 /// Resume a **Codex** session: `codex resume <id>` in a fresh terminal, or
 /// `codex fork <id>` when `fork` is set. Same guarantees as [`resume_session`]
-/// â€” the id must be UUID-shaped and the cwd a real directory free of
-/// quote/control chars â€” because the argument checks, not the command name, are
+/// — the id must be UUID-shaped and the cwd a real directory free of
+/// quote/control chars — because the argument checks, not the command name, are
 /// what make the launch injection-proof. Codex looks a thread up by id wherever
 /// it is run, but it is started in the recorded working directory anyway so the
 /// workspace matches the conversation.
@@ -205,7 +206,7 @@ pub fn resume_codex_session(cwd: &str, id: &str, fork: bool) -> bool {
 #[cfg(windows)]
 fn spawn_codex_resume(cwd: &str, id: &str, fork: bool) -> bool {
     use std::os::windows::process::CommandExt;
-    // Same launcher shape as `spawn_resume` â€” see the long note there for why
+    // Same launcher shape as `spawn_resume` — see the long note there for why
     // the `start` hop is required for the new window to own a real console.
     // `codex` is an npm shim (`codex.cmd`), which is exactly what `cmd /K`
     // resolves.
@@ -229,7 +230,7 @@ fn spawn_codex_resume(cwd: &str, id: &str, fork: bool) -> bool {
 }
 
 /// True when `id` is safe to place in an argv passed to `claude --resume` (or
-/// forwarded over ssh): [0-9a-fA-F-] only AND starting with a hex digit â€” a
+/// forwarded over ssh): [0-9a-fA-F-] only AND starting with a hex digit — a
 /// leading '-' would make it a flag-shaped token (e.g. "-c"). Real session ids
 /// are UUIDs, always hex-first. Reused by the TUI, the web server and fleet.
 pub fn valid_session_id(id: &str) -> bool {
@@ -316,7 +317,7 @@ pub fn resolve_cwd(recorded: &str, remaps: &[(String, String)]) -> Option<(Strin
 
 /// Encode a working directory to the folder name Claude Code stores its
 /// transcripts under: every non-alphanumeric ASCII char becomes `-` (verified
-/// empirically against real `projects/` folders). Lossy (not invertible) â€” used
+/// empirically against real `projects/` folders). Lossy (not invertible) — used
 /// to PLACE a remapped bundle where `claude --resume` will look once you're in
 /// the target directory. Trailing path separators are ignored.
 pub fn encode_cwd(cwd: &str) -> String {
@@ -330,8 +331,8 @@ pub fn encode_cwd(cwd: &str) -> String {
 /// session. Claude stores a transcript under `projects/<encoded-startup-cwd>/`
 /// and `--resume` only looks inside the folder matching the *current* `$PWD`.
 /// The cwd recorded in the transcript can drift to a SUBDIRECTORY the user
-/// `cd`'d into mid-session (e.g. started in `â€¦\myapp`, then worked in
-/// `â€¦\myapp\frontend`); launching there encodes a different folder
+/// `cd`'d into mid-session (e.g. started in `…\myapp`, then worked in
+/// `…\myapp\frontend`); launching there encodes a different folder
 /// and claude reports "No conversation found with session ID".
 ///
 /// The transcript's own location is the source of truth: its parent folder name
@@ -339,7 +340,7 @@ pub fn encode_cwd(cwd: &str) -> String {
 /// to `-`). So we walk up the recorded cwd's ancestors and return the first one
 /// whose encoding equals that folder. Falls back to `recorded` unchanged when
 /// nothing matches (path-agnostic: handles `/` and `\` so it stays testable off
-/// Windows). Cache-proof â€” uses only fields every session already carries.
+/// Windows). Cache-proof — uses only fields every session already carries.
 pub fn resume_cwd_for(jsonl_path: &str, recorded: &str) -> String {
     let folder = {
         let no_file = match jsonl_path.trim_end_matches(['/', '\\']).rfind(['/', '\\']) {
@@ -372,11 +373,11 @@ pub fn resume_cwd_for(jsonl_path: &str, recorded: &str) -> String {
 fn spawn_resume(cwd: &str, id: &str, fork: bool) -> bool {
     use std::os::windows::process::CommandExt;
     // Launch through cmd's `start` builtin so the resumed session gets its OWN
-    // fresh, INTERACTIVE console. Spawning `cmd /K claude â€¦` directly with
+    // fresh, INTERACTIVE console. Spawning `cmd /K claude …` directly with
     // CREATE_NEW_CONSOLE looks right but isn't: Rust's std unconditionally sets
     // STARTF_USESTDHANDLES and binds the child's stdin/stdout to *Phosphor's*
     // console handles, so the new window opens (the session even loads) but the
-    // keyboard is read from Phosphor's console â€” the new window looks dead.
+    // keyboard is read from Phosphor's console — the new window looks dead.
     // `start` re-creates the process with a real new console and no inherited
     // std handles, so keystrokes reach the resumed session. (Verified: the
     // direct child sees a non-console stdin; the start-launched child sees a
@@ -390,7 +391,7 @@ fn spawn_resume(cwd: &str, id: &str, fork: bool) -> bool {
     // (OS-handled, never string-interpolated) and propagates through `start`;
     // id is validated to [0-9a-fA-F-] AND must start with a hex digit, so it is
     // a single inert argv token: it can't be flag-shaped nor carry any cmd.exe
-    // metacharacter (& | < > ^ % " â€¦), so no argument/command can be injected.
+    // metacharacter (& | < > ^ % " …), so no argument/command can be injected.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let mut cmd = std::process::Command::new("cmd");
     cmd.args(["/C", "start", "", "cmd", "/K", "claude", "--resume", id]);
@@ -420,7 +421,7 @@ fn spawn_resume(cwd: &str, id: &str, fork: bool) -> bool {
 /// session's home PC, in the right cwd, drawing on the ssh terminal. Both
 /// arguments are strictly validated (they are joined into a remote shell
 /// command line by ssh itself): the alias by [`fleet::valid_alias`], the id by
-/// [`valid_session_id`]. No BatchMode here â€” the user may need to answer a key
+/// [`valid_session_id`]. No BatchMode here — the user may need to answer a key
 /// passphrase or host prompt interactively.
 pub fn resume_remote_session(alias: &str, id: &str) -> bool {
     if !fleet::valid_alias(alias) || !valid_session_id(id) {
@@ -456,7 +457,7 @@ fn spawn_remote_resume(alias: &str, id: &str) -> bool {
 /// Permanently (HARD) delete a project directory and ALL its transcripts.
 /// IRREVERSIBLE. Strongly confined so a crafted/wrong path can never make
 /// Phosphor delete anything outside the sessions store: `dir` must resolve to a
-/// DIRECT child of `<base>/projects` â€” never `projects/` itself, never outside
+/// DIRECT child of `<base>/projects` — never `projects/` itself, never outside
 /// it, and never through a symlink (the entry must be a real directory). All
 /// three checks must pass before a single byte is removed.
 pub fn delete_project_dir(base: &Path, dir: &Path) -> std::io::Result<()> {
@@ -516,7 +517,7 @@ pub fn copy_to_clipboard(text: &str) -> bool {
 }
 
 /// Reversibly ARCHIVE a project: move `projects/<enc>` to `archived/<enc>` so it
-/// leaves the sessions list (and Claude's `--resume`) WITHOUT being destroyed â€”
+/// leaves the sessions list (and Claude's `--resume`) WITHOUT being destroyed —
 /// it can be restored later. Confined exactly like `delete_project_dir`, and
 /// refuses if an archive of the same folder already exists (never overwrites).
 pub fn archive_project_dir(base: &Path, dir: &Path) -> std::io::Result<PathBuf> {
@@ -586,7 +587,7 @@ pub fn list_archived(base: &Path) -> Vec<(String, u64)> {
 
 /// Delete ONE session transcript (and its sidecar `<id>/` folder of subagents/
 /// workflows, if present), confined to `<base>/projects`. Real `.jsonl` file
-/// only â€” never a symlink, never outside projects/. Used by bulk multi-select
+/// only — never a symlink, never outside projects/. Used by bulk multi-select
 /// delete. Irreversible.
 pub fn delete_session_file(base: &Path, file: &Path) -> std::io::Result<()> {
     use std::io::{Error, ErrorKind};
@@ -684,11 +685,11 @@ mod tests {
         assert!(delete_project_dir(&root, &root).is_err());
         assert!(delete_project_dir(&root, &projects.join("nope")).is_err());
 
-        // deletes a real direct-child project dir (with its sidecar subfolder)â€¦
+        // deletes a real direct-child project dir (with its sidecar subfolder)…
         assert!(proj.exists());
         assert!(delete_project_dir(&root, &proj).is_ok());
         assert!(!proj.exists());
-        assert!(projects.exists()); // â€¦leaving the projects/ parent intact
+        assert!(projects.exists()); // …leaving the projects/ parent intact
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -747,7 +748,7 @@ mod tests {
 
     #[test]
     fn resume_cwd_follows_storage_folder() {
-        // The transcript lives under the startup-cwd folder (â€¦\myapp) but the
+        // The transcript lives under the startup-cwd folder (…\myapp) but the
         // recorded cwd drifted to a subdir the user cd'd into mid-session.
         let jsonl = "C:\\Users\\dev\\.claude\\projects\\C--Users-dev-Desktop-myapp\\16b42417.jsonl";
         // recorded = deep subdir the user cd'd into -> walk back to the folder.
