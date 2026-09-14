@@ -70,6 +70,7 @@ on your PATH. To compile from source, see [Build](#build-from-source).
 | `find <text>` | search prompts, files and tools across all sessions |
 | `cost` | estimated spend 24h / 7d / 30d, budget and top projects |
 | `limits` | plan (e.g. Max 20x) and limit-window reset |
+| `wrapped` | a shareable card of your year on the Desktop, **PNG and SVG** — tokens, cost, energy, water, and how many times you had to correct the agent. Anonymous by default: numbers only |
 | `mcp` | MCP server (stdio) giving Claude recall over your past sessions |
 | `watch` | live monitor: notifies state changes (`Ctrl+C` to quit) |
 | `clean` | disk usage and empty sessions (never deletes without confirmation) |
@@ -441,6 +442,7 @@ writes these files (inside `.claude` and, for exports, on the Desktop):
 | `.phosphor-cache.v7.jsonl` | scan cache, regenerable (rewritten on each scan) |
 | `phosphor-vault/` | hard links to your transcripts, only if you ran `vault on` (no extra bytes; see [The vault](#the-vault--keep-transcripts-for-zero-extra-bytes)) |
 | `Desktop\phosphor-export-*` | CSV/JSON of the current view (timestamped, never overwrites) |
+| `Desktop\phosphor-wrapped-*` | the Wrapped card, PNG + SVG (timestamped, never overwrites) |
 | `Desktop\phosphor-sessioni-*.phx` | portable `export-all` bundle (timestamped, never overwrites) |
 
 Phosphor also reads `~/.claude.json` read-only for plan and limit reset; it does
