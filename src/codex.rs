@@ -171,6 +171,8 @@ struct Roll {
     output: u64,
     messages: u64,
     first_prompt: String,
+    /// First prompt fit to be a title (see the note where it is filled).
+    title_prompt: String,
     last_prompt: String,
     last_kind: u8,
     tools: HashMap<String, u64>,
@@ -187,9 +189,10 @@ struct Roll {
 /// the rollouts, not a guess at the general form, so a real prompt that merely
 /// starts with `<` is left alone.
 fn is_wrapper(t: &str) -> bool {
-    const TAGS: [&str; 6] = [
+    const TAGS: [&str; 7] = [
         "<environment_context",
         "<codex_internal_context",
+        "<recommended_plugins",
         "<turn_aborted",
         "<user_instructions",
         "<model_switch",
@@ -199,6 +202,28 @@ fn is_wrapper(t: &str) -> bool {
     t.is_empty()
         || t.starts_with("# AGENTS.md instructions for ")
         || TAGS.iter().any(|tag| t.starts_with(tag))
+}
+
+/// One line, at most 80 chars: a title lands in a table cell, a CSV field and a
+/// `.phx` manifest, so an injected blob's newlines must not travel with it.
+fn one_line(t: &str) -> String {
+    let mut out = String::new();
+    let mut gap = false;
+    for c in t.trim().chars() {
+        if c.is_whitespace() {
+            gap = !out.is_empty();
+            continue;
+        }
+        if gap {
+            out.push(' ');
+            gap = false;
+        }
+        if out.chars().count() >= 80 {
+            break;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Read one rollout file and fold it into a `Roll`.
@@ -343,6 +368,13 @@ fn parse_payload(p: &mut P, r: &mut Roll) {
                 push_search(&mut r.search, &text);
                 if r.first_prompt.is_empty() {
                     r.first_prompt = trunc(text.clone());
+                }
+                // Safety net for a wrapper Codex adds that `is_wrapper` has not
+                // learnt yet: a title is cosmetic, so it may skip anything
+                // XML-shaped, while `first_prompt` and the search index stay
+                // conservative and only drop the tags we have actually seen.
+                if r.title_prompt.is_empty() && !text.trim_start().starts_with('<') {
+                    r.title_prompt = one_line(&text);
                 }
                 r.last_prompt = trunc(text);
                 r.last_kind = KIND_HUMAN;
@@ -512,20 +544,17 @@ fn to_session(r: Roll, path: &Path, size: u64, mtime: u64, titles: &HashMap<Stri
         .next()
         .unwrap_or(&s.project_path)
         .to_string();
-    // Codex names a thread itself (the picker shows these names); fall back to
-    // the first real prompt, the way the Claude Code side falls back off aiTitle.
+    // Codex names a thread itself and that name is what its own picker shows —
+    // but it only names some of them, so roughly a third arrive unnamed and
+    // have to fall back to the conversation, the way the Claude Code side falls
+    // back off aiTitle.
     s.title = titles
         .get(&s.id)
-        .cloned()
-        .filter(|t| !t.trim().is_empty())
-        .unwrap_or_else(|| {
-            let fp = r.first_prompt.trim();
-            if fp.is_empty() {
-                "(senza titolo)".to_string()
-            } else {
-                fp.chars().take(80).collect()
-            }
-        });
+        .map(|t| one_line(t))
+        .filter(|t| !t.is_empty())
+        .or_else(|| Some(r.title_prompt.clone()).filter(|t| !t.is_empty()))
+        .or_else(|| Some(one_line(&r.first_prompt)).filter(|t| !t.is_empty()))
+        .unwrap_or_else(|| "(senza titolo)".to_string());
     s.first_prompt = r.first_prompt;
     s.last_prompt = r.last_prompt;
     s.message_count = r.messages;
@@ -882,6 +911,39 @@ mod tests {
         let mut cache = HashMap::new();
         // the LAST name for an id wins: Codex appends on every rename
         assert_eq!(scan_incremental(&home, &mut cache).0[0].title, "Parser fix");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn an_unnamed_thread_titles_itself_off_the_first_real_prompt() {
+        // A third of the threads never get a name in session_index.jsonl, and
+        // Codex opens them with injected `user` messages. Two of these blobs are
+        // known wrappers; the third is deliberately one this parser has NEVER
+        // seen, because Codex keeps adding them — the title must still land on
+        // what the human typed.
+        let home = tmp();
+        write_rollout(
+            &home,
+            "rollout-2026-09-04T10-00-00-aaaa1111-0000-0000-0000-000000000001.jsonl",
+            &[
+                META,
+                r#"{"timestamp":"2026-09-04T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<recommended_plugins>\nHere is a list of plugins\n</recommended_plugins>"}]}}"#,
+                // two hashes: this record's text opens with `"#`, which would
+                // close a plain r#"…"# right there
+                r##"{"timestamp":"2026-09-04T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for C:\\proj\\demo\n\nfai cosi"}]}}"##,
+                r#"{"timestamp":"2026-09-04T10:00:03.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<qualcosa_di_nuovo>\nun wrapper futuro\n</qualcosa_di_nuovo>"}]}}"#,
+                r#"{"timestamp":"2026-09-04T10:00:04.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"  esamina   image_rec\n  sul desktop  "}]}}"#,
+            ],
+        );
+        let mut cache = HashMap::new();
+        let s = &scan_incremental(&home, &mut cache).0[0];
+        // one line, whitespace collapsed — a title travels into a table cell,
+        // a CSV field and a .phx manifest
+        assert_eq!(s.title, "esamina image_rec sul desktop");
+        // the unknown wrapper is still indexed and still counts as a prompt:
+        // only the TITLE is allowed to be picky
+        assert!(s.search_text.contains("un wrapper futuro"));
+        assert!(s.first_prompt.starts_with("<qualcosa_di_nuovo>"));
         std::fs::remove_dir_all(&home).ok();
     }
 

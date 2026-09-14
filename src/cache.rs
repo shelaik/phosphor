@@ -8,8 +8,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 fn cache_path(base: &Path) -> PathBuf {
-    // versioned: bumping this invalidates old caches when the schema changes
-    base.join(".phosphor-cache.v6.jsonl")
+    // Versioned: bumping this invalidates old caches. Bump it for a change in
+    // the SHAPE of an entry *or* in how one is derived — a cached row is reused
+    // whenever path+size+mtime match, so a parser fix alone would never reach
+    // the transcripts already scanned (v7: Codex titles).
+    base.join(".phosphor-cache.v7.jsonl")
 }
 
 pub fn load(base: &Path) -> HashMap<String, Session> {
