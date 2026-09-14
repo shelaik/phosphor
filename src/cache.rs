@@ -12,7 +12,7 @@ fn cache_path(base: &Path) -> PathBuf {
     // the SHAPE of an entry *or* in how one is derived — a cached row is reused
     // whenever path+size+mtime match, so a parser fix alone would never reach
     // the transcripts already scanned (v7: Codex titles).
-    base.join(".phosphor-cache.v7.jsonl")
+    base.join(".phosphor-cache.v8.jsonl")
 }
 
 pub fn load(base: &Path) -> HashMap<String, Session> {
@@ -70,7 +70,7 @@ fn to_line(s: &Session) -> String {
             "\"sm\":\"{}\",\"fp\":\"{}\",\"lp\":\"{}\",\"mc\":{},\"it\":{},\"ot\":{},",
             "\"cr\":{},\"cc\":{},\"md\":[{}],\"tl\":[{}],\"fl\":[{}],\"gb\":\"{}\",",
             "\"v\":\"{}\",\"ep\":\"{}\",\"cd\":\"{}\",\"mo\":\"{}\",\"mt\":{},\"sz\":{},",
-            "\"sc\":{},\"ct\":{},\"lk\":{},\"st\":\"{}\",\"ks\":\"{}\",\"ag\":\"{}\"}}"
+            "\"sc\":{},\"ct\":{},\"lk\":{},\"st\":\"{}\",\"ks\":\"{}\",\"ag\":\"{}\",\"cx\":{}}}"
         ),
         escape(&s.id),
         escape(&s.path),
@@ -101,6 +101,7 @@ fn to_line(s: &Session) -> String {
         escape(&s.search_text),
         ks,
         escape(&s.agent),
+        s.corrections,
     )
 }
 
@@ -180,6 +181,7 @@ fn parse_line(buf: &[u8]) -> Option<Session> {
             "mt" => s.mtime_ms = p.take_number() as u64,
             "sz" => s.size = p.take_number() as u64,
             "ag" => s.agent = p.take_string().unwrap_or_default(),
+            "cx" => s.corrections = p.take_number() as u64,
             "sc" => s.is_sidechain = p.take_bool(),
             "ct" => s.is_continuation = p.take_bool(),
             "lk" => s.last_kind = p.take_number() as u8,

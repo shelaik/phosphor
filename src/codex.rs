@@ -170,6 +170,7 @@ struct Roll {
     cache_write: u64,
     output: u64,
     messages: u64,
+    corrections: u64,
     first_prompt: String,
     /// First prompt fit to be a title (see the note where it is filled).
     title_prompt: String,
@@ -366,6 +367,9 @@ fn parse_payload(p: &mut P, r: &mut Roll) {
             "user" if !is_wrapper(&text) => {
                 r.messages += 1;
                 push_search(&mut r.search, &text);
+                if crate::corrections::is_correction(&text) {
+                    r.corrections += 1;
+                }
                 if r.first_prompt.is_empty() {
                     r.first_prompt = trunc(text.clone());
                 }
@@ -558,6 +562,7 @@ fn to_session(r: Roll, path: &Path, size: u64, mtime: u64, titles: &HashMap<Stri
     s.first_prompt = r.first_prompt;
     s.last_prompt = r.last_prompt;
     s.message_count = r.messages;
+    s.corrections = r.corrections;
     // OpenAI reports `input_tokens` INCLUSIVE of the cached prefix, Anthropic
     // reports it exclusive. Subtract so one cost formula fits both and cached
     // reads are not billed at the full input rate.

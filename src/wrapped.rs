@@ -44,6 +44,10 @@ pub struct Opts {
 
 pub struct Card {
     pub svg: String,
+    /// La stessa card come PNG. L'SVG non lo renderizzano X, Reddit e quasi
+    /// nessuna chat: senza questo la card esiste ma non circola, che era
+    /// l'unica cosa che doveva fare.
+    pub png: Vec<u8>,
     /// Short tag used in the filename + title (e.g. "2026", "7g", "tutto").
     pub label: String,
     /// One-line terminal summary.
@@ -191,6 +195,7 @@ pub fn render(sessions: &[Session], cfg: &Config, now_ms: u64, opts: &Opts) -> C
     // Aggregates over the existing per-session fields.
     let mut tok_io: u64 = 0; // input + output (the headline flex)
     let mut msgs: u64 = 0;
+    let mut corrections: u64 = 0;
     let mut cost = 0.0;
     let mut wh = 0.0;
     let mut water_ml = 0.0;
@@ -203,6 +208,7 @@ pub fn render(sessions: &[Session], cfg: &Config, now_ms: u64, opts: &Opts) -> C
     for s in &sel {
         tok_io += s.input_tokens + s.output_tokens;
         msgs += s.message_count;
+        corrections += s.corrections;
         cost += config::cost(s, &cfg.prices);
         let (e, w) = config::footprint(s, cfg.energy_wh_per_token, cfg.water_ml_per_token);
         wh += e;
@@ -257,12 +263,13 @@ pub fn render(sessions: &[Session], cfg: &Config, now_ms: u64, opts: &Opts) -> C
         _ => "Claude Code",
     };
     let subtitle = window_subtitle(&opts.window, agents);
-    let svg = draw(SvgData {
+    let d = SvgData {
         label: &label,
         subtitle: &subtitle,
         sessions: sel.len(),
         tok_io,
         msgs,
+        corrections,
         cost,
         wh,
         water_ml,
@@ -276,7 +283,9 @@ pub fn render(sessions: &[Session], cfg: &Config, now_ms: u64, opts: &Opts) -> C
         spark: by_day.values().copied().collect(),
         projs: &projs,
         opts,
-    });
+    };
+    let svg = draw(&d);
+    let png = draw_png(&d);
 
     let cost_part = if opts.show_cost { format!(" · {}", usd(cost)) } else { String::new() };
     let summary = format!(
@@ -289,7 +298,7 @@ pub fn render(sessions: &[Session], cfg: &Config, now_ms: u64, opts: &Opts) -> C
         sel.len()
     );
 
-    Card { svg, label, summary, sessions_count: sel.len() }
+    Card { svg, png, label, summary, sessions_count: sel.len() }
 }
 
 /// Longest run of consecutive calendar days that have activity.
@@ -316,6 +325,7 @@ struct SvgData<'a> {
     sessions: usize,
     tok_io: u64,
     msgs: u64,
+    corrections: u64,
     cost: f64,
     wh: f64,
     water_ml: f64,
@@ -331,7 +341,87 @@ struct SvgData<'a> {
     opts: &'a Opts,
 }
 
-fn draw(d: SvgData) -> String {
+/// The same card, rasterised — see [`crate::png`] for why this exists at all.
+///
+/// It is not a rendering of the SVG (that would need a font engine); it is the
+/// same content laid out for a pixel grid, which is the look Phosphor already
+/// has. The numbers, and their order, are deliberately identical: the two files
+/// must never disagree about what your year looked like.
+fn draw_png(d: &SvgData) -> Vec<u8> {
+    use crate::png::{text_width, Canvas};
+    // La palette dell'SVG, in RGB.
+    let rgb = |hex: &str| -> [u8; 3] {
+        let h = hex.trim_start_matches('#');
+        let n = u32::from_str_radix(h, 16).unwrap_or(0);
+        [(n >> 16) as u8, (n >> 8) as u8, n as u8]
+    };
+    let (bg, panel, frame, dim, green, bright, energy, water) = (
+        rgb(BG), rgb(PANEL), rgb(FRAME), rgb(DIM), rgb(GREEN), rgb(BRIGHT), rgb(ENERGY), rgb(WATER),
+    );
+    let (w, h) = (1200usize, 630usize);
+    let mut c = Canvas::new(w, h, bg);
+    c.rect_outline(12, 12, w - 24, h - 24, 2, frame);
+
+    // intestazione
+    c.text(44, 44, 5, green, "PHOSPHOR WRAPPED");
+    c.text(44, 92, 3, bright, &d.label.to_uppercase());
+    c.text(44, 124, 2, dim, d.subtitle);
+
+    // pannello degli stat principali
+    c.fill_rect(36, 168, w - 72, 150, panel);
+    c.rect_outline(36, 168, w - 72, 150, 1, frame);
+    let cell = |c: &mut Canvas, x: isize, label: &str, value: &str, col: [u8; 3]| {
+        c.text(x, 190, 2, dim, label);
+        c.text(x, 224, 5, col, value);
+    };
+    cell(&mut c, 64, "TOKEN", &fmt_tokens(d.tok_io), bright);
+    cell(&mut c, 344, "SESSIONI", &d.sessions.to_string(), bright);
+    // "Correzioni" scalza "messaggi" quando ce ne sono: è l'unica cifra della
+    // card che parla della collaborazione invece che del volume, e l'unica che
+    // non lusinga chi la pubblica.
+    if d.corrections > 0 {
+        cell(&mut c, 604, "CORREZIONI (STIMA)", &d.corrections.to_string(), bright);
+    } else {
+        cell(&mut c, 604, "MESSAGGI", &fmt_tokens(d.msgs), bright);
+    }
+    if d.opts.show_cost {
+        cell(&mut c, 884, "COSTO STIMATO", &usd(d.cost), green);
+    }
+
+    // l'eroe: energia e acqua, le uniche cifre che nessun altro mostra
+    c.fill_rect(36, 336, 552, 150, panel);
+    c.rect_outline(36, 336, 552, 150, 1, frame);
+    c.text(64, 358, 2, dim, "ENERGIA");
+    c.text(64, 392, 6, energy, &fmt_wh(d.wh));
+    c.text(64, 446, 2, dim, &format!("~ {} RICARICHE DI TELEFONO", d.phone_charges));
+
+    c.fill_rect(612, 336, 552, 150, panel);
+    c.rect_outline(612, 336, 552, 150, 1, frame);
+    c.text(640, 358, 2, dim, "ACQUA");
+    c.text(640, 392, 6, water, &fmt_l(d.water_ml));
+    c.text(640, 446, 2, dim, &format!("~ {} BOTTIGLIE DA MEZZO LITRO", d.bottles));
+
+    // riga di coda
+    let tail = format!(
+        "TOOL {} · MODELLO {} · GIORNO PIENO {} · STRISCIA {}g · {} FILE",
+        d.top_tool.to_uppercase(),
+        d.top_model.to_uppercase(),
+        d.busiest,
+        d.streak,
+        d.files
+    );
+    c.text(44, 512, 2, green, &tail);
+    if !d.opts.anonymous && !d.projs.is_empty() {
+        let names: Vec<String> = d.projs.iter().take(3).map(|(n, _)| n.to_uppercase()).collect();
+        c.text(44, 540, 2, dim, &format!("TOP: {}", names.join(" · ")));
+    }
+    let foot = "MADE WITH PHOSPHOR · 100% OFFLINE · ENERGIA/ACQUA: STIMA, ORDINE DI GRANDEZZA";
+    c.text((w as isize) - 44 - text_width(foot, 1) as isize, 580, 1, dim, foot);
+
+    c.to_png()
+}
+
+fn draw(d: &SvgData) -> String {
     let (w, h) = (1200, 630);
     let mut s = String::with_capacity(8192);
     s.push_str(&format!(

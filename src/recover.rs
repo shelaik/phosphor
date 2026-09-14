@@ -270,6 +270,13 @@ fn ghost(projects: &Path, folder: &str, cwd: &str, idx: usize, b: &[&Prompt]) ->
         }
     };
     s.message_count = b.len() as u64;
+    // Un ghost e' fatto SOLO di prompt dell'utente: e' la fonte piu' pulita che
+    // esista per questa stima, e senza di lui il conteggio ignorerebbe i tre
+    // quarti della cronologia.
+    s.corrections = b
+        .iter()
+        .filter(|p| crate::corrections::is_correction(&p.text))
+        .count() as u64;
     s.created = iso(b0);
     s.modified = iso(b1);
     s.mtime_ms = b1;

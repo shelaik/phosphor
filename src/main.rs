@@ -687,25 +687,41 @@ fn do_wrapped(base: &std::path::Path, sessions: &[Session], cfg: &config::Config
         return;
     }
     let dir = desktop_dir(base);
-    // Nice name first (phosphor-wrapped-2026.svg); if it already exists, fall back
-    // to a timestamped name so we never overwrite an existing card.
-    let plain = dir.join(format!("phosphor-wrapped-{}.svg", card.label));
-    let path = if plain.exists() {
-        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
-        dir.join(format!("phosphor-wrapped-{}-{}.svg", card.label, stamp))
-    } else {
-        plain
+    // Nice name first (phosphor-wrapped-2026.png); if it already exists, fall back
+    // to a timestamped name so we never overwrite an existing card. The stamp is
+    // shared by both files so the pair stays recognisable.
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let name = |ext: &str| {
+        let plain = dir.join(format!("phosphor-wrapped-{}.{ext}", card.label));
+        if plain.exists() {
+            dir.join(format!("phosphor-wrapped-{}-{}.{ext}", card.label, stamp))
+        } else {
+            plain
+        }
     };
-    match phosphor::write_new(&path, card.svg.as_bytes()) {
-        Ok(()) => {
+    // PNG first: it is the one that actually travels. The SVG stays as the
+    // lossless original for anyone who wants to print or edit it.
+    let (png_path, svg_path) = (name("png"), name("svg"));
+    let png_ok = phosphor::write_new(&png_path, &card.png);
+    let svg_ok = phosphor::write_new(&svg_path, card.svg.as_bytes());
+    match (&png_ok, &svg_ok) {
+        (Err(e), Err(_)) => {
+            eprintln!("✗ Scrittura fallita ({e}). Esiste già un file con quel nome? Riprova.")
+        }
+        _ => {
             println!("✓ {}", card.summary);
-            println!("    {}", path.display());
-            println!("\nÈ un SVG: aprilo nel browser e fai uno screenshot per condividerlo.");
+            if png_ok.is_ok() {
+                println!("    {}", png_path.display());
+            }
+            if svg_ok.is_ok() {
+                println!("    {}   (vettoriale, per stampa o ritocchi)", svg_path.display());
+            }
+            println!("\nIl PNG si incolla direttamente su X, Reddit, Slack: nessuno di loro");
+            println!("renderizza un SVG, ed era il motivo per cui la card non circolava.");
             if opts.anonymous {
                 println!("Privacy: mostra solo numeri (nessun nome progetto/percorso). Usa --with-projects per i nomi.");
             }
         }
-        Err(e) => eprintln!("✗ Scrittura fallita ({e}). Esiste già un file con quel nome? Riprova."),
     }
 }
 

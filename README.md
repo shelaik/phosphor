@@ -114,6 +114,7 @@ mouse too.
 | `a` | sub-agents and workflows | | `p` | pixel graphics on/off |
 | `R` | immediate rescan | | `m` | chart metric |
 | `F` | fleet: merge sessions from your other PCs (ssh) | | `V` | restore a `⛁` session from the vault |
+| `W` | Wrapped card (PNG + SVG) on the Desktop | | | |
 | `q` / `Ctrl+C` | quit | | | |
 
 The *Resume*, *export* and *import* actions show what they will do first and ask

@@ -75,6 +75,9 @@ pub struct Session {
     /// Code, "codex" = OpenAI Codex CLI (see `crate::codex`). A string rather
     /// than an enum so a third agent costs no schema change.
     pub agent: String,
+    /// Quante volte l'utente ha dovuto correggere l'agente (stima: vedi
+    /// [`crate::corrections`]). E' l'unico numero della card che non lusinga.
+    pub corrections: u64,
 }
 
 impl Session {
@@ -835,6 +838,9 @@ fn parse_line(
                     && t.contains("This session is being continued from a previous conversation")
                 {
                     s.is_continuation = true;
+                }
+                if crate::corrections::is_correction(&t) {
+                    s.corrections += 1;
                 }
                 if s.first_prompt.is_empty() {
                     s.first_prompt = t.clone();

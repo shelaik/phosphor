@@ -46,7 +46,7 @@ fn session_to_json(s: &Session) -> String {
             "\"models\":[{}],\"tools\":[{}],\"files\":[{}],\"filesCount\":{},",
             "\"gitBranch\":\"{}\",\"version\":\"{}\",\"entrypoint\":\"{}\",",
             "\"created\":\"{}\",\"modified\":\"{}\",\"mtime\":{},\"size\":{},",
-            "\"subagents\":{},\"workflows\":{},\"sidechain\":{},\"recovered\":{},\"vaulted\":{},",
+            "\"subagents\":{},\"workflows\":{},\"sidechain\":{},\"recovered\":{},\"vaulted\":{},\"corrections\":{},",
             "\"agent\":\"{}\",\"live\":\"{}\",\"status\":\"{}\",\"pid\":{},\"lastState\":\"{}\"}}"
         ),
         esc(&s.id),
@@ -76,6 +76,7 @@ fn session_to_json(s: &Session) -> String {
         s.is_sidechain,
         s.is_ghost(),
         s.is_vaulted(),
+        s.corrections,
         esc(if s.agent.is_empty() { "claude" } else { &s.agent }),
         esc(&s.live),
         esc(&s.status),

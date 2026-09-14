@@ -271,6 +271,7 @@ const A_COPYPATH: u16 = 31;
 const A_ARCHIVE: u16 = 32;
 const A_FLEET: u16 = 33;
 const A_VAULT_RESTORE: u16 = 34;
+const A_WRAPPED: u16 = 35;
 
 struct Theme {
     fg: Color,
@@ -836,6 +837,7 @@ impl App {
             MenuItem { key: "y",   label: "Copia percorso",        action: A_COPYPATH },
             MenuItem { key: "H",   label: "Archivia progetto",     action: A_ARCHIVE },
             MenuItem { key: "V",   label: "Ripristina dal vault",  action: A_VAULT_RESTORE },
+            MenuItem { key: "W",   label: "Card Wrapped (PNG)",   action: A_WRAPPED },
             MenuItem { key: "D",   label: "Cancella progetto…",    action: A_DELPROJECT },
         ];
         self.menu = Some(Menu { title, items, sel: 0, col, row });
@@ -1128,6 +1130,42 @@ impl App {
         }
         self.status = format!("apro  {}", clip(&dir, 44));
     }
+    /// Write the Wrapped card to the Desktop, without leaving the list.
+    ///
+    /// It used to be CLI-only, which meant quitting the app to get the one
+    /// thing in it you might want to show someone. The card is built from the
+    /// sessions already on screen, so it follows nothing but the current scan —
+    /// and it is anonymous, so it can be posted without a second thought.
+    fn make_wrapped(&mut self) {
+        if self.dry {
+            return;
+        }
+        let cfg = crate::config::load(&self.base);
+        let opts = crate::wrapped::Opts {
+            window: crate::wrapped::parse_window("anno", now_ms()),
+            anonymous: true,
+            show_cost: true,
+        };
+        let card = crate::wrapped::render(&self.all, &cfg, now_ms(), &opts);
+        if card.sessions_count == 0 {
+            self.status = "nessuna sessione quest'anno: niente card".into();
+            return;
+        }
+        let dir = std::env::var("USERPROFILE")
+            .map(|h| PathBuf::from(h).join("Desktop"))
+            .unwrap_or_else(|_| self.base.clone());
+        let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+        let png = dir.join(format!("phosphor-wrapped-{}-{stamp}.png", card.label));
+        let svg = dir.join(format!("phosphor-wrapped-{}-{stamp}.svg", card.label));
+        let ok_png = crate::write_new(&png, &card.png).is_ok();
+        let _ = crate::write_new(&svg, card.svg.as_bytes());
+        self.status = if ok_png {
+            format!("✓ {} → {}", card.summary, clip(&png.to_string_lossy(), 42))
+        } else {
+            "✗ non ho potuto scrivere la card sul Desktop".into()
+        };
+    }
+
     /// Ask, once, whether to stop Claude Code from deleting the history.
     ///
     /// Shown on the first run that finds a retention short enough to lose work
@@ -2398,6 +2436,7 @@ fn dispatch(app: &mut App, code: u16) -> bool {
         A_ARCHIVE => { if app.tab == 0 && app.selected().is_some() { app.request_archive_project(); } }
         A_FLEET => app.start_fleet_fetch(),
         A_VAULT_RESTORE => app.restore_from_vault(),
+        A_WRAPPED => app.make_wrapped(),
         A_HELP => { app.help = true; app.help_scroll = 0; }
         A_TAB => app.tab = (app.tab + 1) % 3,
         A_PIXEL => { app.pixel = !app.pixel; app.status = if app.pixel { "pixel ON".into() } else { "pixel OFF".into() }; }
@@ -2625,6 +2664,7 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
         KeyCode::Char('H') => { if app.tab == 0 && app.selected().is_some() { app.request_archive_project(); } }
         KeyCode::Char('F') => app.start_fleet_fetch(),
         KeyCode::Char('V') => { if app.tab == 0 && app.selected().is_some() { app.restore_from_vault(); } }
+        KeyCode::Char('W') => app.make_wrapped(),
         KeyCode::Char('X') => { if app.tab == 0 { app.request_delete_marked(); } }
         KeyCode::Esc => { if !app.marked.is_empty() { app.marked.clear(); app.status = "selezione azzerata".into(); } }
         KeyCode::Char('g') => app.open_gsearch(),
@@ -3979,6 +4019,7 @@ fn render_help(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         item("r  ·  e", "riprendi (claude --resume)  ·  export CSV/JSON"),
         item("x  ·  i", "esporta bundle .phx  ·  importa (selettore file + conferma)"),
         item("H", "ARCHIVIA il progetto (lo nasconde in archived/, reversibile) — ripristina da CLI"),
+        item("W", "WRAPPED: genera sul Desktop la card riassuntiva dell'anno (PNG + SVG) — token, costo, energia, acqua. Anonima: solo numeri."),
         item("V", "RIPRISTINA dal vault: rimette il transcript nel magazzino del suo agente (solo righe ⛁)"),
         item("F", "FLOTTA: interroga i tuoi altri PC via ssh e unisce le loro sessioni [alias]"),
         item("", "  (configura con:  phosphor remote add <alias-ssh> · su remoto: r riprende LÀ)"),
