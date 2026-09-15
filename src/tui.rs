@@ -551,8 +551,8 @@ struct App {
     note_editing: bool, // editing the note (or alias) of the selected session
     note_is_alias: bool, // the shared text editor is editing an ALIAS, not a note
     note_buf: String,   // in-progress note/alias text
-    energy_wh_per_token: f64, // footprint rates (display-only; edited in phosphor.json)
-    water_ml_per_token: f64,
+    energy_wh_per_output_token: f64, // footprint rates (display-only; edited in phosphor.json)
+    water_l_per_kwh: f64,
     all: Vec<Session>,
     view: Vec<usize>,
     tab: usize,
@@ -742,13 +742,13 @@ impl App {
         let favorites: HashSet<String> = fav_cfg.favorites.into_iter().collect();
         let notes: HashMap<String, String> = fav_cfg.notes.into_iter().collect();
         let aliases: HashMap<String, String> = fav_cfg.aliases.into_iter().collect();
-        let energy_wh_per_token = fav_cfg.energy_wh_per_token;
-        let water_ml_per_token = fav_cfg.water_ml_per_token;
+        let energy_wh_per_output_token = fav_cfg.energy_wh_per_output_token;
+        let water_l_per_kwh = fav_cfg.water_l_per_kwh;
         let mut a = App {
             base, cache, prices, budget, remaps, sync_repo, watch,
             remotes: fav_cfg.remotes, fleet: vec![], fleet_tx: None, fleet_gen: 0, fleet_expect: 0, fleet_got: 0,
             favorites, marked: HashSet::new(), notes, aliases, note_editing: false, note_is_alias: false, note_buf: String::new(),
-            energy_wh_per_token, water_ml_per_token, all,
+            energy_wh_per_output_token, water_l_per_kwh, all,
             view: vec![], tab: 0, ts: TableState::default(),
             search: String::new(), searching: false, state_filter: 0, metric: 0,
             sort_col: 0, sort_desc: true, theme_idx, pixel,
@@ -3379,7 +3379,7 @@ fn render_sessions(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         let (dot, dc) = match s.live.as_str() { "running" => ("●", th.run), "idle" => ("◐", th.idle), _ => ("·", th.dim) };
         let ag = s.subagents + s.workflows;
         let c = cost(s, &app.prices);
-        let (wh, ml) = crate::config::footprint(s, app.energy_wh_per_token, app.water_ml_per_token);
+        let (wh, ml) = crate::config::footprint(s, app.energy_wh_per_output_token, app.water_l_per_kwh);
         Row::new(vec![
             Cell::from(dot).style(Style::default().fg(dc)),
             // Two signals, never one: the hue separates the agents at a glance
@@ -3438,7 +3438,7 @@ fn render_sessions(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
     // rows, so collapsing a chain doesn't change the reported count/footprint.
     let total_size: u64 = app.view_all.iter().map(|&i| app.all[i].size).sum();
     let (twh, tml) = app.view_all.iter()
-        .map(|&i| crate::config::footprint(&app.all[i], app.energy_wh_per_token, app.water_ml_per_token))
+        .map(|&i| crate::config::footprint(&app.all[i], app.energy_wh_per_output_token, app.water_l_per_kwh))
         .fold((0.0, 0.0), |(e, w), (de, dw)| (e + de, w + dw));
     let hidden = app.view_all.len().saturating_sub(app.view.len());
     let folded = if hidden > 0 { format!(" · {} riprese compresse", hidden) } else { String::new() };
@@ -3892,7 +3892,7 @@ fn render_detail(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         kv("token", format!("{}  (in {} · out {} · cache {})", fmt_tok(tok_of(&s)), fmt_tok(s.input_tokens), fmt_tok(s.output_tokens), fmt_tok(s.cache_read + s.cache_creation))),
         kv("costo", format!("{} (stima)", fmt_usd(cost(&s, &app.prices)))),
         {
-            let (wh, ml) = crate::config::footprint(&s, app.energy_wh_per_token, app.water_ml_per_token);
+            let (wh, ml) = crate::config::footprint(&s, app.energy_wh_per_output_token, app.water_l_per_kwh);
             kv("footprint", format!("{} · {} (stima, ±ordine di grandezza)", fmt_wh(wh), fmt_ml(ml)))
         },
         kv("dimensione", fmt_size(s.size)),

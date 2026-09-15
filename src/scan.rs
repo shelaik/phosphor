@@ -33,6 +33,21 @@ pub struct Session {
     pub output_tokens: u64,
     pub cache_read: u64,
     pub cache_creation: u64,
+    /// The same tokens, split **by model and by kind** — see [`KIND_IN`] and
+    /// friends for the order.
+    ///
+    /// The aggregates above cannot be priced or weighed honestly on their own:
+    /// a single session routinely spans two to four models (Opus and Fable in
+    /// the same conversation is the normal case here), and charging all of it
+    /// to whichever model spoke first is simply wrong. Cache writes are split
+    /// by TTL for the same reason — Anthropic bills the 1-hour cache at twice
+    /// the base input rate and the 5-minute one at 1.25x, and on this machine
+    /// essentially all of it is the expensive kind.
+    ///
+    /// Empty for rows that never had per-message detail: recovered ghosts,
+    /// fleet rows ingested from another PC. Costing falls back to the
+    /// aggregates for those.
+    pub usage: Vec<(String, [u64; 5])>,
     pub models: Vec<String>,
     pub tools: Vec<(String, u64)>,
     pub files: Vec<String>,
@@ -80,7 +95,46 @@ pub struct Session {
     pub corrections: u64,
 }
 
+/// Indices into a [`Session::usage`] bucket. Kept as constants rather than an
+/// enum so the array stays a plain `[u64; 5]` that serialises as five numbers.
+pub const KIND_IN: usize = 0;
+pub const KIND_OUT: usize = 1;
+pub const KIND_CACHE_READ: usize = 2;
+/// Cache written with the 5-minute TTL: billed at 1.25x the base input rate.
+pub const KIND_CACHE_5M: usize = 3;
+/// Cache written with the 1-hour TTL: billed at 2x. Not a rounding difference —
+/// it is 60% more than the 5-minute rate, and it is what nearly all of this
+/// machine's cache writes actually are.
+pub const KIND_CACHE_1H: usize = 4;
+pub const KINDS: usize = 5;
+
 impl Session {
+    /// Add `n` tokens of one kind to a model's bucket, and to the aggregate.
+    /// The two are always written together so they can never drift apart.
+    pub fn add_usage(&mut self, model: &str, kind: usize, n: u64) {
+        if n == 0 {
+            return;
+        }
+        match kind {
+            KIND_IN => self.input_tokens += n,
+            KIND_OUT => self.output_tokens += n,
+            KIND_CACHE_READ => self.cache_read += n,
+            _ => self.cache_creation += n,
+        }
+        let m = if model.is_empty() { "?" } else { model };
+        if let Some(e) = self.usage.iter_mut().find(|(k, _)| k == m) {
+            e.1[kind] += n;
+            return;
+        }
+        // A session with more models than this is a bug in the transcript, not
+        // a workflow: the cap keeps a hostile file from growing the row.
+        if self.usage.len() < 16 {
+            let mut v = [0u64; KINDS];
+            v[kind] = n;
+            self.usage.push((m.to_string(), v));
+        }
+    }
+
     /// True for a session RECONSTRUCTED from `history.jsonl` by
     /// [`crate::recover`]: the transcript it describes was deleted by Claude
     /// Code's retention, so there is no file at `path` to read, resume or
@@ -875,6 +929,12 @@ fn parse_message(
     if !p.obj_begin() {
         return;
     }
+    // Model and usage live in the same message object but in no guaranteed
+    // order, so both are buffered and attributed once the object closes —
+    // reading them as they arrive would charge a message to whatever model
+    // happened to be named first.
+    let mut msg_model = String::new();
+    let mut msg_usage = [0u64; KINDS];
     loop {
         let k = match p.obj_key() {
             Some(k) => k,
@@ -886,13 +946,16 @@ fn parse_message(
             }
             "model" => {
                 if let Some(m) = p.take_string() {
-                    if !m.is_empty() && !models.iter().any(|x| x == &m) {
-                        models.push(m);
+                    if !m.is_empty() {
+                        if !models.iter().any(|x| x == &m) {
+                            models.push(m.clone());
+                        }
+                        msg_model = m;
                     }
                 }
             }
             "usage" => {
-                parse_usage(p, s);
+                parse_usage(p, &mut msg_usage);
             }
             "content" => match p.peek_ws() {
                 b'"' => {
@@ -913,6 +976,9 @@ fn parse_message(
         if !p.obj_sep() {
             break;
         }
+    }
+    for (kind, n) in msg_usage.iter().enumerate() {
+        s.add_usage(&msg_model, kind, *n);
     }
 }
 
@@ -957,20 +1023,60 @@ fn parse_content(p: &mut P, has_tool_use: &mut bool, tools: &mut HashMap<String,
     }
 }
 
-fn parse_usage(p: &mut P, s: &mut Session) {
+/// Read one `usage` object into a per-kind tally.
+///
+/// `cache_creation_input_tokens` is the TOTAL of the nested `cache_creation`
+/// breakdown, so it is only used when that breakdown is absent (older
+/// transcripts). When both appear the split wins, because the TTL is what
+/// decides the price.
+fn parse_usage(p: &mut P, out: &mut [u64; KINDS]) {
     if !p.obj_begin() {
         return;
     }
+    let mut cache_total = 0u64;
+    let mut split_seen = false;
     loop {
         let k = match p.obj_key() {
             Some(k) => k,
             None => break,
         };
         match k.as_str() {
-            "input_tokens" => s.input_tokens += p.take_number() as u64,
-            "output_tokens" => s.output_tokens += p.take_number() as u64,
-            "cache_read_input_tokens" => s.cache_read += p.take_number() as u64,
-            "cache_creation_input_tokens" => s.cache_creation += p.take_number() as u64,
+            "input_tokens" => out[KIND_IN] += p.take_number().max(0.0) as u64,
+            "output_tokens" => out[KIND_OUT] += p.take_number().max(0.0) as u64,
+            "cache_read_input_tokens" => out[KIND_CACHE_READ] += p.take_number().max(0.0) as u64,
+            "cache_creation_input_tokens" => cache_total += p.take_number().max(0.0) as u64,
+            "cache_creation" => {
+                if p.obj_begin() {
+                    loop {
+                        let ck = match p.obj_key() {
+                            Some(x) => x,
+                            None => break,
+                        };
+                        let n = match ck.as_str() {
+                            "ephemeral_5m_input_tokens" => {
+                                let n = p.take_number().max(0.0) as u64;
+                                out[KIND_CACHE_5M] += n;
+                                n
+                            }
+                            "ephemeral_1h_input_tokens" => {
+                                let n = p.take_number().max(0.0) as u64;
+                                out[KIND_CACHE_1H] += n;
+                                n
+                            }
+                            _ => {
+                                let _ = p.skip();
+                                0
+                            }
+                        };
+                        split_seen |= n > 0;
+                        if !p.obj_sep() {
+                            break;
+                        }
+                    }
+                } else {
+                    let _ = p.skip();
+                }
+            }
             _ => {
                 let _ = p.skip();
             }
@@ -978,6 +1084,10 @@ fn parse_usage(p: &mut P, s: &mut Session) {
         if !p.obj_sep() {
             break;
         }
+    }
+    if !split_seen {
+        // No breakdown: assume the cheaper TTL rather than inflate the bill.
+        out[KIND_CACHE_5M] += cache_total;
     }
 }
 

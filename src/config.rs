@@ -10,7 +10,12 @@ pub struct Price {
     pub pin: f64,
     pub pout: f64,
     pub pcr: f64,
+    /// Cache written with the 5-minute TTL (1.25x base input).
     pub pcw: f64,
+    /// Cache written with the 1-hour TTL (2x base input). A separate rate
+    /// because it is 60% dearer and, in practice, the one actually used: on the
+    /// store this was built against, 718M of 718M cache-write tokens were 1h.
+    pub pcw1h: f64,
 }
 #[derive(Clone)]
 pub struct Prices {
@@ -27,13 +32,13 @@ impl Default for Prices {
             // Prezzi a listino API per milione di token (in/out, cache read ~0.1x
             // input, cache write 5min ~1.25x input). Opus 4.x = 5/25 (NON 15/75:
             // quello era Opus 3 / 4.0-4.1). Editabili in phosphor.json.
-            opus: Price { pin: 5.0, pout: 25.0, pcr: 0.5, pcw: 6.25 },
-            sonnet: Price { pin: 3.0, pout: 15.0, pcr: 0.30, pcw: 3.75 },
-            haiku: Price { pin: 1.0, pout: 5.0, pcr: 0.10, pcw: 1.25 },
+            opus: Price { pin: 5.0, pout: 25.0, pcr: 0.5, pcw: 6.25, pcw1h: 10.0 },
+            sonnet: Price { pin: 3.0, pout: 15.0, pcr: 0.30, pcw: 3.75, pcw1h: 6.0 },
+            haiku: Price { pin: 1.0, pout: 5.0, pcr: 0.10, pcw: 1.25, pcw1h: 2.0 },
             // GPT-5 a listino: 1.25 in / 10 out, cache read 0.1x. OpenAI non
-            // fattura la scrittura di cache, quindi pcw = pin.
-            gpt: Price { pin: 1.25, pout: 10.0, pcr: 0.125, pcw: 1.25 },
-            default: Price { pin: 5.0, pout: 25.0, pcr: 0.5, pcw: 6.25 },
+            // fattura la scrittura di cache, quindi entrambe le pcw = pin.
+            gpt: Price { pin: 1.25, pout: 10.0, pcr: 0.125, pcw: 1.25, pcw1h: 1.25 },
+            default: Price { pin: 5.0, pout: 25.0, pcr: 0.5, pcw: 6.25, pcw1h: 10.0 },
         }
     }
 }
@@ -68,13 +73,16 @@ pub struct Config {
     /// TUI key F). Aliases only — hosts, users and keys live in ~/.ssh/config
     /// and ssh-agent; Phosphor never stores or sees credentials.
     pub remotes: Vec<String>,
-    /// Rough inference energy per token (Wh). Default 0.0005 ≈ 0.5 Wh/1k token
-    /// (triangolato: Google Gemini 0.24 Wh/prompt, letteratura ~5e-4 Wh/token).
-    pub energy_wh_per_token: f64,
-    /// Rough on-site cooling water per token (mL). Default 0.0005 (operational,
-    /// data center efficiente). Il footprint TOTALE (incl. acqua per l'energia)
-    /// può essere ~100x più alto — vedi LCA Mistral.
-    pub water_ml_per_token: f64,
+    /// Energia di UN token GENERATO su un modello di taglia media (Wh). Default
+    /// 0.0005, ancorato agli ~0.24 Wh per prompt mediano pubblicati da Google: e' la
+    /// generazione, la sola grandezza di cui esista una misura. Input, scritture di
+    /// cache e letture vengono scalate da qui (vedi footprint).
+    pub energy_wh_per_output_token: f64,
+    /// On-site cooling water per kWh of inference energy (WUE, L/kWh). Default 1.0,
+    /// tipico di un data center efficiente. Derivata dall'energia, non contata sui
+    /// token una seconda volta, cosi' le due cifre non possono divergere. Il
+    /// footprint TOTALE (inclusa l'acqua per generare l'energia) puo' essere ~100x.
+    pub water_l_per_kwh: f64,
     /// Keep transcripts alive by hard-linking them into `<base>/phosphor-vault`
     /// (see [`crate::vault`]). **Off by default**: it is the one feature that
     /// creates files, and Phosphor is read-only until the user says otherwise.
@@ -87,40 +95,131 @@ pub struct Config {
 }
 impl Default for Config {
     fn default() -> Self {
-        Config { prices: Prices::default(), theme: "fosfori".into(), watch: 5, pixel: false, budget: 0.0, path_remaps: Vec::new(), sync_repo: String::new(), sync_encrypt: String::new(), sync_identity: String::new(), favorites: Vec::new(), notes: Vec::new(), aliases: Vec::new(), remotes: Vec::new(), energy_wh_per_token: 0.0005, water_ml_per_token: 0.0005, vault: false, retention_asked: false }
+        Config { prices: Prices::default(), theme: "fosfori".into(), watch: 5, pixel: false, budget: 0.0, path_remaps: Vec::new(), sync_repo: String::new(), sync_encrypt: String::new(), sync_identity: String::new(), favorites: Vec::new(), notes: Vec::new(), aliases: Vec::new(), remotes: Vec::new(), energy_wh_per_output_token: 0.0005, water_l_per_kwh: 1.0, vault: false, retention_asked: false }
     }
 }
 
-/// Estimated (energy Wh, water mL) footprint of a session. Applied to the
-/// tokens that required fresh compute — input, output, and cache *creation* —
-/// and NOT cache reads (served from cache, near-zero marginal compute). A rough
-/// order-of-magnitude estimate; there is no official Anthropic per-token figure.
-pub fn footprint(s: &Session, energy_wh_per_token: f64, water_ml_per_token: f64) -> (f64, f64) {
-    let compute_tokens = (s.input_tokens + s.output_tokens + s.cache_creation) as f64;
-    (compute_tokens * energy_wh_per_token, compute_tokens * water_ml_per_token)
+/// How much more energy one OUTPUT token costs than one input-class token.
+///
+/// Prefill reads the whole prompt in one batched, compute-bound pass; decoding
+/// emits one token per forward pass and is bound by reading the weights from
+/// memory each time. The per-token gap is large and well documented in
+/// direction, not in magnitude — 8x is a middle estimate, and the point of
+/// having it at all is that a reply-heavy month should not look identical to a
+/// month spent pasting context.
+const OUTPUT_ENERGY_FACTOR: f64 = 8.0;
+
+/// Cache reads skip prefill but still move the tokens through the machine.
+/// Cheap, not free — previously counted as exactly zero.
+const CACHE_READ_ENERGY_FACTOR: f64 = 0.05;
+
+/// Energy scale by model class, relative to a mid-size (Sonnet-class) model.
+/// Energy per token tracks the number of active parameters, so a Haiku token
+/// and an Opus token are not the same token. Deliberately coarse: the ratios
+/// are defensible, three significant figures would not be.
+fn model_energy_factor(model: &str, codex: bool) -> f64 {
+    let m = model.to_lowercase();
+    if m.contains("haiku") {
+        0.25
+    } else if m.contains("sonnet") {
+        1.0
+    } else if m.contains("opus") || m.contains("fable") {
+        3.0
+    } else if codex || m.starts_with("gpt") || m.starts_with("o1") || m.starts_with("o3") {
+        1.0
+    } else {
+        1.0
+    }
 }
 
-/// Estimated USD cost of a session using the configured prices.
-pub fn cost(s: &Session, p: &Prices) -> f64 {
-    let m = s.models.first().map(|x| x.to_lowercase()).unwrap_or_default();
-    let pr = if m.contains("sonnet") {
+/// Estimated (energy Wh, water mL) footprint of a session.
+///
+/// `energy_wh_per_output_token` is the anchor: the energy of ONE **generated**
+/// token on a mid-size model. Generation is what the published figures actually
+/// describe — Google's ~0.24 Wh per median Gemini prompt is the energy of
+/// producing a reply — so tying the constant to anything else quietly
+/// misapplies the only number anyone has measured. Input-class tokens (prompt,
+/// cache writes) are that divided by [`OUTPUT_ENERGY_FACTOR`]; cache reads are
+/// cheaper still; and the whole lot scales with the model actually used.
+///
+/// `water_l_per_kwh` then converts energy into on-site cooling water, which is
+/// how data centres report it (WUE). Deriving water from energy instead of
+/// counting tokens a second time means the two figures can never disagree.
+///
+/// Still an order-of-magnitude estimate: no vendor publishes per-token numbers.
+/// What changed is that it is now *relatively* honest — a Haiku session no
+/// longer weighs the same as an Opus one, and generating is no longer as cheap
+/// as reading.
+pub fn footprint(s: &Session, energy_wh_per_output_token: f64, water_l_per_kwh: f64) -> (f64, f64) {
+    let mut wh = 0.0;
+    let codex = s.is_codex();
+    let per_input = energy_wh_per_output_token / OUTPUT_ENERGY_FACTOR;
+    let mut add = |model: &str, u: &[u64; crate::scan::KINDS]| {
+        let f = model_energy_factor(model, codex);
+        let weighted = u[crate::scan::KIND_IN] as f64
+            + u[crate::scan::KIND_OUT] as f64 * OUTPUT_ENERGY_FACTOR
+            + u[crate::scan::KIND_CACHE_READ] as f64 * CACHE_READ_ENERGY_FACTOR
+            + u[crate::scan::KIND_CACHE_5M] as f64
+            + u[crate::scan::KIND_CACHE_1H] as f64;
+        wh += weighted * per_input * f;
+    };
+    if s.usage.is_empty() {
+        // No per-model detail (a ghost, or a row ingested from another PC):
+        // fall back to the aggregates under the session's first model.
+        let model = s.models.first().cloned().unwrap_or_default();
+        let u = [s.input_tokens, s.output_tokens, s.cache_read, s.cache_creation, 0];
+        add(&model, &u);
+    } else {
+        for (model, u) in &s.usage {
+            add(model, u);
+        }
+    }
+    (wh, wh / 1000.0 * water_l_per_kwh * 1000.0)
+}
+
+/// Prices for one model name.
+fn price_for<'a>(p: &'a Prices, model: &str, codex: bool) -> &'a Price {
+    let m = model.to_lowercase();
+    if m.contains("sonnet") {
         &p.sonnet
     } else if m.contains("haiku") {
         &p.haiku
-    } else if m.contains("opus") {
+    } else if m.contains("opus") || m.contains("fable") {
+        // Fable is an Opus-class model: pricing it as "default" happened to give
+        // the same numbers, but only by accident.
         &p.opus
-    } else if s.is_codex() || m.starts_with("gpt") || m.starts_with("o1") || m.starts_with("o3") {
+    } else if codex || m.starts_with("gpt") || m.starts_with("o1") || m.starts_with("o3") {
         // Codex bills against OpenAI's list, not Anthropic's; a session with no
         // model recorded still costs like the agent that produced it.
         &p.gpt
     } else {
         &p.default
+    }
+}
+
+/// Estimated USD cost of a session using the configured prices.
+///
+/// Priced **per model**: a session that ran Opus and Fable and Sonnet is billed
+/// as three, because that is what happened. Charging the whole thing to
+/// whichever model spoke first is the single largest error this estimate used
+/// to carry — sessions here routinely span two to four of them.
+pub fn cost(s: &Session, p: &Prices) -> f64 {
+    let codex = s.is_codex();
+    let one = |model: &str, u: &[u64; crate::scan::KINDS]| {
+        let pr = price_for(p, model, codex);
+        (u[crate::scan::KIND_IN] as f64 * pr.pin
+            + u[crate::scan::KIND_OUT] as f64 * pr.pout
+            + u[crate::scan::KIND_CACHE_READ] as f64 * pr.pcr
+            + u[crate::scan::KIND_CACHE_5M] as f64 * pr.pcw
+            + u[crate::scan::KIND_CACHE_1H] as f64 * pr.pcw1h)
+            / 1e6
     };
-    (s.input_tokens as f64 * pr.pin
-        + s.output_tokens as f64 * pr.pout
-        + s.cache_read as f64 * pr.pcr
-        + s.cache_creation as f64 * pr.pcw)
-        / 1e6
+    if s.usage.is_empty() {
+        let model = s.models.first().cloned().unwrap_or_default();
+        let u = [s.input_tokens, s.output_tokens, s.cache_read, s.cache_creation, 0];
+        return one(&model, &u);
+    }
+    s.usage.iter().map(|(m, u)| one(m, u)).sum()
 }
 
 fn cfg_path(base: &Path) -> PathBuf {
@@ -154,7 +253,7 @@ pub fn load(base: &Path) -> Config {
 }
 
 fn parse_price(p: &mut P) -> Option<Price> {
-    let mut pr = Price { pin: 0.0, pout: 0.0, pcr: 0.0, pcw: 0.0 };
+    let mut pr = Price { pin: 0.0, pout: 0.0, pcr: 0.0, pcw: 0.0, pcw1h: -1.0 };
     if !p.obj_begin() {
         return None;
     }
@@ -168,6 +267,7 @@ fn parse_price(p: &mut P) -> Option<Price> {
             "out" => pr.pout = p.take_number(),
             "cacheRead" => pr.pcr = p.take_number(),
             "cacheWrite" => pr.pcw = p.take_number(),
+            "cacheWrite1h" => pr.pcw1h = p.take_number(),
             _ => {
                 let _ = p.skip();
             }
@@ -175,6 +275,12 @@ fn parse_price(p: &mut P) -> Option<Price> {
         if !p.obj_sep() {
             break;
         }
+    }
+    // A config written before the 1-hour rate existed has no such key. Derive
+    // it from the base input rate (Anthropic charges 2x) instead of leaving it
+    // at zero, which would silently make the dearest tokens free.
+    if pr.pcw1h < 0.0 {
+        pr.pcw1h = pr.pin * 2.0;
     }
     Some(pr)
 }
@@ -203,8 +309,8 @@ fn parse(buf: &[u8], c: &mut Config) {
                     c.sync_repo = v;
                 }
             }
-            "energyWhPerToken" => c.energy_wh_per_token = p.take_number().max(0.0),
-            "waterMlPerToken" => c.water_ml_per_token = p.take_number().max(0.0),
+            "energyWhPerOutputToken" => c.energy_wh_per_output_token = p.take_number().max(0.0),
+            "waterLPerKwh" => c.water_l_per_kwh = p.take_number().max(0.0),
             "vault" => c.vault = p.take_bool(),
             "retentionAsked" => c.retention_asked = p.take_bool(),
             "syncEncrypt" => {
@@ -357,8 +463,8 @@ fn obj_block(pairs: &[(String, String)]) -> String {
 pub fn save(base: &Path, c: &Config) {
     let pr = |x: &Price| {
         format!(
-            "{{ \"in\": {}, \"out\": {}, \"cacheRead\": {}, \"cacheWrite\": {} }}",
-            x.pin, x.pout, x.pcr, x.pcw
+            "{{ \"in\": {}, \"out\": {}, \"cacheRead\": {}, \"cacheWrite\": {}, \"cacheWrite1h\": {} }}",
+            x.pin, x.pout, x.pcr, x.pcw, x.pcw1h
         )
     };
     let fav_json = c
@@ -374,13 +480,13 @@ pub fn save(base: &Path, c: &Config) {
         .collect::<Vec<_>>()
         .join(",\n");
     let txt = format!(
-        "{{\n  \"theme\": \"{}\",\n  \"pixel\": {},\n  \"watch\": {},\n  \"budget\": {},\n  \"energyWhPerToken\": {},\n  \"waterMlPerToken\": {},\n  \"vault\": {},\n  \"retentionAsked\": {},\n  \"syncRepo\": \"{}\",\n  \"syncEncrypt\": \"{}\",\n  \"syncIdentity\": \"{}\",\n  \"favorites\": [{}],\n  \"remotes\": [{}],\n  \"notes\": {{{}}},\n  \"aliases\": {{{}}},\n  \"pathRemaps\": {{{}}},\n  \"prices\": {{\n    \"opus\":    {},\n    \"sonnet\":  {},\n    \"haiku\":   {},\n    \"gpt\":     {},\n    \"default\": {}\n  }}\n}}\n",
+        "{{\n  \"theme\": \"{}\",\n  \"pixel\": {},\n  \"watch\": {},\n  \"budget\": {},\n  \"energyWhPerOutputToken\": {},\n  \"waterLPerKwh\": {},\n  \"vault\": {},\n  \"retentionAsked\": {},\n  \"syncRepo\": \"{}\",\n  \"syncEncrypt\": \"{}\",\n  \"syncIdentity\": \"{}\",\n  \"favorites\": [{}],\n  \"remotes\": [{}],\n  \"notes\": {{{}}},\n  \"aliases\": {{{}}},\n  \"pathRemaps\": {{{}}},\n  \"prices\": {{\n    \"opus\":    {},\n    \"sonnet\":  {},\n    \"haiku\":   {},\n    \"gpt\":     {},\n    \"default\": {}\n  }}\n}}\n",
         crate::json::escape(&c.theme),
         c.pixel,
         c.watch,
         c.budget,
-        c.energy_wh_per_token,
-        c.water_ml_per_token,
+        c.energy_wh_per_output_token,
+        c.water_l_per_kwh,
         c.vault,
         c.retention_asked,
         crate::json::escape(&c.sync_repo),
@@ -406,6 +512,69 @@ pub fn save(base: &Path, c: &Config) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_session_is_priced_model_by_model_not_by_the_first_one() {
+        use crate::scan::{KIND_IN, KIND_OUT};
+        let p = Prices::default();
+        let mut s = crate::scan::Session::default();
+        // L'ordine conta: il modello caro parla per primo, quello economico fa
+        // il grosso del lavoro. Prezzare tutto col primo gonfia il conto.
+        s.models = vec!["claude-opus-5".into(), "claude-haiku-4-5".into()];
+        s.add_usage("claude-opus-5", KIND_OUT, 1_000_000);
+        s.add_usage("claude-haiku-4-5", KIND_OUT, 1_000_000);
+        // 25 (opus) + 5 (haiku), non 50 come darebbe il vecchio calcolo
+        assert!((cost(&s, &p) - 30.0).abs() < 1e-9, "costo: {}", cost(&s, &p));
+        // gli aggregati restano coerenti coi bucket
+        assert_eq!(s.output_tokens, 2_000_000);
+        // …e senza dettaglio per modello si ripiega sul primo, come prima
+        let mut old = crate::scan::Session::default();
+        old.models = vec!["claude-opus-5".into()];
+        old.output_tokens = 2_000_000;
+        assert!((cost(&old, &p) - 50.0).abs() < 1e-9);
+        let _ = KIND_IN;
+    }
+
+    #[test]
+    fn the_one_hour_cache_costs_more_than_the_five_minute_one() {
+        use crate::scan::{KIND_CACHE_1H, KIND_CACHE_5M};
+        let p = Prices::default();
+        let mk = |kind: usize| {
+            let mut s = crate::scan::Session::default();
+            s.models = vec!["claude-opus-5".into()];
+            s.add_usage("claude-opus-5", kind, 1_000_000);
+            cost(&s, &p)
+        };
+        // Opus: input 5 -> 5m = 1.25x = 6.25, 1h = 2x = 10.00
+        assert!((mk(KIND_CACHE_5M) - 6.25).abs() < 1e-9);
+        assert!((mk(KIND_CACHE_1H) - 10.0).abs() < 1e-9);
+        assert!(mk(KIND_CACHE_1H) > mk(KIND_CACHE_5M), "la 1h non puo' costare meno");
+    }
+
+    #[test]
+    fn energy_separates_generating_from_reading_and_big_from_small() {
+        use crate::scan::{KIND_CACHE_READ, KIND_IN, KIND_OUT};
+        let wh = |model: &str, kind: usize| {
+            let mut s = crate::scan::Session::default();
+            s.models = vec![model.into()];
+            s.add_usage(model, kind, 1_000_000);
+            footprint(&s, 0.0005, 1.0).0
+        };
+        // generare costa piu' che leggere, sullo stesso modello
+        assert!(wh("claude-sonnet-4", KIND_OUT) > wh("claude-sonnet-4", KIND_IN) * 5.0);
+        // leggere dalla cache costa pochissimo, ma non zero
+        let cr = wh("claude-sonnet-4", KIND_CACHE_READ);
+        assert!(cr > 0.0 && cr < wh("claude-sonnet-4", KIND_IN));
+        // un token Haiku non e' un token Opus
+        assert!(wh("claude-opus-5", KIND_OUT) > wh("claude-haiku-4-5", KIND_OUT) * 5.0);
+        // l'acqua deriva dall'energia: raddoppia il WUE, raddoppia l'acqua
+        let mut s = crate::scan::Session::default();
+        s.add_usage("claude-sonnet-4", KIND_OUT, 1_000_000);
+        let (e1, w1) = footprint(&s, 0.0005, 1.0);
+        let (e2, w2) = footprint(&s, 0.0005, 2.0);
+        assert!((e1 - e2).abs() < 1e-9, "il WUE non tocca l'energia");
+        assert!((w2 - w1 * 2.0).abs() < 1e-6);
+    }
+
     #[test]
     fn codex_sessions_are_priced_off_the_gpt_list() {
         let p = Prices::default();

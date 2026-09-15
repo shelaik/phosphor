@@ -262,14 +262,14 @@ fn print_cost(base: &std::path::Path, sessions: &[Session], cfg: &config::Config
     // Rough energy/water footprint (stima, ±ordine di grandezza).
     let foot = |w: u64| -> (f64, f64) {
         sessions.iter().filter(|s| now.saturating_sub(s.mtime_ms) < w)
-            .map(|s| config::footprint(s, cfg.energy_wh_per_token, cfg.water_ml_per_token))
+            .map(|s| config::footprint(s, cfg.energy_wh_per_output_token, cfg.water_l_per_kwh))
             .fold((0.0, 0.0), |(e, wt), (de, dw)| (e + de, wt + dw))
     };
     let (e24, w24) = foot(d);
     let (e7, w7) = foot(7 * d);
     let (e30, w30) = foot(30 * d);
     let (etot, wtot) = sessions.iter()
-        .map(|s| config::footprint(s, cfg.energy_wh_per_token, cfg.water_ml_per_token))
+        .map(|s| config::footprint(s, cfg.energy_wh_per_output_token, cfg.water_l_per_kwh))
         .fold((0.0, 0.0), |(e, wt), (de, dw)| (e + de, wt + dw));
     println!("\nFootprint stimato (energia · acqua on-site) — STIMA, ±ordine di grandezza:");
     println!("  ultime 24h : {}  ·  {}", fmt_wh(e24), fmt_ml(w24));

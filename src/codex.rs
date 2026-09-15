@@ -566,11 +566,16 @@ fn to_session(r: Roll, path: &Path, size: u64, mtime: u64, titles: &HashMap<Stri
     // OpenAI reports `input_tokens` INCLUSIVE of the cached prefix, Anthropic
     // reports it exclusive. Subtract so one cost formula fits both and cached
     // reads are not billed at the full input rate.
-    s.input_tokens = r.input.saturating_sub(r.cached);
-    s.cache_read = r.cached;
-    s.cache_creation = r.cache_write;
-    s.output_tokens = r.output;
     s.models = r.models;
+    // Codex reports one running total for the whole thread, not per message, so
+    // the whole thing lands in one bucket under the model it ran on. Its cache
+    // writes have no TTL split — OpenAI does not bill them separately — so they
+    // go under the cheap kind.
+    let model = s.models.first().cloned().unwrap_or_default();
+    s.add_usage(&model, crate::scan::KIND_IN, r.input.saturating_sub(r.cached));
+    s.add_usage(&model, crate::scan::KIND_OUT, r.output);
+    s.add_usage(&model, crate::scan::KIND_CACHE_READ, r.cached);
+    s.add_usage(&model, crate::scan::KIND_CACHE_5M, r.cache_write);
     let mut tv: Vec<(String, u64)> = r.tools.into_iter().collect();
     tv.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     tv.truncate(20);

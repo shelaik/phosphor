@@ -12,7 +12,7 @@ fn cache_path(base: &Path) -> PathBuf {
     // the SHAPE of an entry *or* in how one is derived — a cached row is reused
     // whenever path+size+mtime match, so a parser fix alone would never reach
     // the transcripts already scanned (v7: Codex titles).
-    base.join(".phosphor-cache.v8.jsonl")
+    base.join(".phosphor-cache.v9.jsonl")
 }
 
 pub fn load(base: &Path) -> HashMap<String, Session> {
@@ -64,13 +64,24 @@ fn to_line(s: &Session) -> String {
     // kin sketch: fixed-width hex u64s concatenated, so no JSON-number f64
     // precision loss on round-trip.
     let ks: String = s.kin_sketch.iter().map(|h| format!("{:016x}", h)).collect();
+    let usage = s
+        .usage
+        .iter()
+        .map(|(m, u)| {
+            format!(
+                "[\"{}\",{},{},{},{},{}]",
+                escape(m), u[0], u[1], u[2], u[3], u[4]
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
         concat!(
             "{{\"id\":\"{}\",\"path\":\"{}\",\"pp\":\"{}\",\"pn\":\"{}\",\"t\":\"{}\",",
             "\"sm\":\"{}\",\"fp\":\"{}\",\"lp\":\"{}\",\"mc\":{},\"it\":{},\"ot\":{},",
             "\"cr\":{},\"cc\":{},\"md\":[{}],\"tl\":[{}],\"fl\":[{}],\"gb\":\"{}\",",
             "\"v\":\"{}\",\"ep\":\"{}\",\"cd\":\"{}\",\"mo\":\"{}\",\"mt\":{},\"sz\":{},",
-            "\"sc\":{},\"ct\":{},\"lk\":{},\"st\":\"{}\",\"ks\":\"{}\",\"ag\":\"{}\",\"cx\":{}}}"
+            "\"sc\":{},\"ct\":{},\"lk\":{},\"st\":\"{}\",\"ks\":\"{}\",\"ag\":\"{}\",\"cx\":{},\"us\":[{}]}}"
         ),
         escape(&s.id),
         escape(&s.path),
@@ -102,6 +113,7 @@ fn to_line(s: &Session) -> String {
         ks,
         escape(&s.agent),
         s.corrections,
+        usage,
     )
 }
 
@@ -134,6 +146,38 @@ fn parse_tools(p: &mut P) -> Vec<(String, u64)> {
                     }
                 }
                 v.push((name, cnt));
+            } else {
+                let _ = p.skip();
+            }
+            if !p.arr_sep() {
+                break;
+            }
+        }
+    }
+    v
+}
+
+/// `[["model", in, out, cacheRead, cache5m, cache1h], …]` — the per-model token
+/// split. Written as arrays rather than objects: five numbers per model, and
+/// this file is read on every launch.
+fn parse_usage_buckets(p: &mut P) -> Vec<(String, [u64; crate::scan::KINDS])> {
+    let mut v = Vec::new();
+    if p.arr_begin() {
+        loop {
+            if p.peek_ws() == b'[' && p.arr_begin() {
+                let name = p.take_string().unwrap_or_default();
+                let mut u = [0u64; crate::scan::KINDS];
+                let mut i = 0;
+                while p.arr_sep() {
+                    let n = p.take_number().max(0.0) as u64;
+                    if i < crate::scan::KINDS {
+                        u[i] = n;
+                    }
+                    i += 1;
+                }
+                if !name.is_empty() {
+                    v.push((name, u));
+                }
             } else {
                 let _ = p.skip();
             }
@@ -182,6 +226,7 @@ fn parse_line(buf: &[u8]) -> Option<Session> {
             "sz" => s.size = p.take_number() as u64,
             "ag" => s.agent = p.take_string().unwrap_or_default(),
             "cx" => s.corrections = p.take_number() as u64,
+            "us" => s.usage = parse_usage_buckets(&mut p),
             "sc" => s.is_sidechain = p.take_bool(),
             "ct" => s.is_continuation = p.take_bool(),
             "lk" => s.last_kind = p.take_number() as u8,

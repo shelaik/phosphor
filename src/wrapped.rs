@@ -86,13 +86,13 @@ fn window_label(w: &Window) -> String {
 /// tool the numbers did not come from.
 fn window_subtitle(w: &Window, agents: &str) -> String {
     let span = match w {
-        Window::Days(7) => "la tua settimana".to_string(),
-        Window::Days(30) => "il tuo mese".to_string(),
-        Window::Days(n) => format!("i tuoi ultimi {n} giorni"),
-        Window::Year(_) => "il tuo anno".to_string(),
-        Window::All => "tutto il tuo tempo".to_string(),
+        Window::Days(7) => "your week".to_string(),
+        Window::Days(30) => "your month".to_string(),
+        Window::Days(n) => format!("your last {n} days"),
+        Window::Year(_) => "your year".to_string(),
+        Window::All => "all your time".to_string(),
     };
-    format!("{span} con {agents} · 100% offline")
+    format!("{span} with {agents} · 100% offline")
 }
 
 fn in_window(s: &Session, now_ms: u64, w: &Window) -> bool {
@@ -210,7 +210,7 @@ pub fn render(sessions: &[Session], cfg: &Config, now_ms: u64, opts: &Opts) -> C
         msgs += s.message_count;
         corrections += s.corrections;
         cost += config::cost(s, &cfg.prices);
-        let (e, w) = config::footprint(s, cfg.energy_wh_per_token, cfg.water_ml_per_token);
+        let (e, w) = config::footprint(s, cfg.energy_wh_per_output_token, cfg.water_l_per_kwh);
         wh += e;
         water_ml += w;
         for (name, n) in &s.tools {
@@ -374,36 +374,36 @@ fn draw_png(d: &SvgData) -> Vec<u8> {
         c.text(x, 190, 2, dim, label);
         c.text(x, 224, 5, col, value);
     };
-    cell(&mut c, 64, "TOKEN", &fmt_tokens(d.tok_io), bright);
-    cell(&mut c, 344, "SESSIONI", &d.sessions.to_string(), bright);
+    cell(&mut c, 64, "TOKENS", &fmt_tokens(d.tok_io), bright);
+    cell(&mut c, 344, "SESSIONS", &d.sessions.to_string(), bright);
     // "Correzioni" scalza "messaggi" quando ce ne sono: è l'unica cifra della
     // card che parla della collaborazione invece che del volume, e l'unica che
     // non lusinga chi la pubblica.
     if d.corrections > 0 {
-        cell(&mut c, 604, "CORREZIONI (STIMA)", &d.corrections.to_string(), bright);
+        cell(&mut c, 604, "CORRECTIONS (EST.)", &d.corrections.to_string(), bright);
     } else {
-        cell(&mut c, 604, "MESSAGGI", &fmt_tokens(d.msgs), bright);
+        cell(&mut c, 604, "MESSAGES", &fmt_tokens(d.msgs), bright);
     }
     if d.opts.show_cost {
-        cell(&mut c, 884, "COSTO STIMATO", &usd(d.cost), green);
+        cell(&mut c, 884, "ESTIMATED COST", &usd(d.cost), green);
     }
 
     // l'eroe: energia e acqua, le uniche cifre che nessun altro mostra
     c.fill_rect(36, 336, 552, 150, panel);
     c.rect_outline(36, 336, 552, 150, 1, frame);
-    c.text(64, 358, 2, dim, "ENERGIA");
+    c.text(64, 358, 2, dim, "ENERGY");
     c.text(64, 392, 6, energy, &fmt_wh(d.wh));
-    c.text(64, 446, 2, dim, &format!("~ {} RICARICHE DI TELEFONO", d.phone_charges));
+    c.text(64, 446, 2, dim, &format!("~ {} PHONE CHARGES", d.phone_charges));
 
     c.fill_rect(612, 336, 552, 150, panel);
     c.rect_outline(612, 336, 552, 150, 1, frame);
-    c.text(640, 358, 2, dim, "ACQUA");
+    c.text(640, 358, 2, dim, "WATER");
     c.text(640, 392, 6, water, &fmt_l(d.water_ml));
-    c.text(640, 446, 2, dim, &format!("~ {} BOTTIGLIE DA MEZZO LITRO", d.bottles));
+    c.text(640, 446, 2, dim, &format!("~ {} HALF-LITRE BOTTLES", d.bottles));
 
     // riga di coda
     let tail = format!(
-        "TOOL {} · MODELLO {} · GIORNO PIENO {} · STRISCIA {}g · {} FILE",
+        "TOP TOOL {} · MODEL {} · BUSIEST {} · STREAK {}d · {} FILES",
         d.top_tool.to_uppercase(),
         d.top_model.to_uppercase(),
         d.busiest,
@@ -415,7 +415,7 @@ fn draw_png(d: &SvgData) -> Vec<u8> {
         let names: Vec<String> = d.projs.iter().take(3).map(|(n, _)| n.to_uppercase()).collect();
         c.text(44, 540, 2, dim, &format!("TOP: {}", names.join(" · ")));
     }
-    let foot = "MADE WITH PHOSPHOR · 100% OFFLINE · ENERGIA/ACQUA: STIMA, ORDINE DI GRANDEZZA";
+    let foot = "MADE WITH PHOSPHOR · 100% OFFLINE · ENERGY AND WATER ARE ORDER-OF-MAGNITUDE ESTIMATES";
     c.text((w as isize) - 44 - text_width(foot, 1) as isize, 580, 1, dim, foot);
 
     c.to_png()
@@ -450,34 +450,34 @@ fn draw(d: &SvgData) -> String {
 
     // hero footprint panel
     s.push_str(&format!("<rect x=\"40\" y=\"112\" width=\"{}\" height=\"132\" fill=\"{PANEL}\" rx=\"8\"/>\n", w - 80));
-    txt(&mut s, 72, 146, 16, DIM, "400", "start", "ENERGIA STIMATA");
+    txt(&mut s, 72, 146, 16, DIM, "400", "start", "ESTIMATED ENERGY");
     txt(&mut s, 72, 200, 50, ENERGY, "800", "start", &fmt_wh(d.wh));
-    txt(&mut s, 72, 230, 15, DIM, "400", "start", &format!("≈ {} ricariche di smartphone", d.phone_charges));
-    txt(&mut s, 624, 146, 16, DIM, "400", "start", "ACQUA STIMATA");
+    txt(&mut s, 72, 230, 15, DIM, "400", "start", &format!("~ {} phone charges", d.phone_charges));
+    txt(&mut s, 624, 146, 16, DIM, "400", "start", "ESTIMATED WATER");
     txt(&mut s, 624, 200, 50, WATER, "800", "start", &fmt_l(d.water_ml));
-    txt(&mut s, 624, 230, 15, DIM, "400", "start", &format!("≈ {} bottiglie da 0,5 L", d.bottles));
+    txt(&mut s, 624, 230, 15, DIM, "400", "start", &format!("~ {} half-litre bottles", d.bottles));
 
     // stat grid 3x3
     let cols = [72, 458, 844];
     let rows = [300, 372, 444];
     let cost_val = if d.opts.show_cost { usd(d.cost) } else { "nascosto".into() };
     let grid: [(&str, String, &str); 9] = [
-        ("TOKEN (in+out)", fmt_tokens(d.tok_io), BRIGHT),
-        ("COSTO STIMATO", cost_val, BRIGHT),
-        ("SESSIONI", d.sessions.to_string(), GREEN),
-        ("MESSAGGI", fmt_tokens(d.msgs), GREEN),
-        ("FILE TOCCATI", d.files.to_string(), GREEN),
-        ("TOOL PIÙ USATO", d.top_tool.to_string(), GREEN),
-        ("GIORNO TOP", d.busiest.to_string(), GREEN),
-        ("STREAK (giorni)", d.streak.to_string(), GREEN),
-        ("MODELLO TOP", d.top_model.to_string(), GREEN),
+        ("TOKENS (in+out)", fmt_tokens(d.tok_io), BRIGHT),
+        ("ESTIMATED COST", cost_val, BRIGHT),
+        ("SESSIONS", d.sessions.to_string(), GREEN),
+        ("MESSAGES", fmt_tokens(d.msgs), GREEN),
+        ("FILES TOUCHED", d.files.to_string(), GREEN),
+        ("TOP TOOL", d.top_tool.to_string(), GREEN),
+        ("BUSIEST DAY", d.busiest.to_string(), GREEN),
+        ("STREAK (days)", d.streak.to_string(), GREEN),
+        ("TOP MODEL", d.top_model.to_string(), GREEN),
     ];
     for (i, (lab, val, col)) in grid.iter().enumerate() {
         cell(&mut s, cols[i % 3], rows[i / 3], lab, val, col);
     }
 
     // sparkline of daily activity
-    txt(&mut s, 48, 500, 14, DIM, "400", "start", "attività giornaliera (token)");
+    txt(&mut s, 48, 500, 14, DIM, "400", "start", "daily activity (tokens)");
     draw_spark(&mut s, &d.spark, 48, 512, (w - 96) as i32, 46);
 
     // privacy ledger OR top projects
@@ -506,7 +506,7 @@ fn draw(d: &SvgData) -> String {
         DIM,
         "400",
         "start",
-        "made with Phosphor · github.com/shelaik/phosphor · energia/acqua: stima ±ordine di grandezza, nessuna cifra ufficiale Anthropic",
+        "made with Phosphor · github.com/shelaik/phosphor · energy & water are order-of-magnitude estimates: no vendor publishes per-token figures",
     );
 
     s.push_str("</svg>\n");
@@ -564,7 +564,7 @@ mod tests {
         assert!(card.svg.starts_with("<?xml"));
         assert!(card.svg.contains("<svg"));
         assert!(card.svg.contains("PHOSPHOR WRAPPED"));
-        assert!(card.svg.contains("ENERGIA STIMATA"));
+        assert!(card.svg.contains("ESTIMATED ENERGY"));
         assert!(card.svg.trim_end().ends_with("</svg>"));
         assert_eq!(card.sessions_count, 1);
         // anonymous default must NOT leak the project name anywhere

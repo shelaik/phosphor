@@ -461,11 +461,43 @@ Codex, `default` for anything else), default `theme` and `pixel`, `watch` interv
 `budget` for alerts, `pathRemaps` for cross-PC resume, `syncRepo` /
 `syncEncrypt` / `syncIdentity` for the optional git sync, your `favorites`
 and `notes`, `vault` for the hard-link vault (off by default),
-and `energyWhPerToken` / `waterMlPerToken` for the (rough) energy
-and water footprint estimate shown by `cost` and in the detail view.
+and `energyWhPerOutputToken` / `waterLPerKwh` for the footprint estimate shown
+by `cost`, in the detail view and on the Wrapped card.
 
 Seven retro palettes cycled with `t` / `T`: phosphor (green), amber, ice,
 synthwave, matrix, red, blue. The chosen theme is saved.
+
+### How the cost and footprint are worked out
+
+Both are computed **per model and per token kind**, not per session, because a
+single session routinely spans two to four models — charging all of it to
+whichever model answered first was the largest error these numbers used to
+carry.
+
+**Cost** follows the published list prices, with one distinction most tools
+miss: a cache write is billed at 1.25x the base input rate for the 5-minute TTL
+but **2x** for the 1-hour one, and in real use almost all of it is the 1-hour
+kind. Both rates are in `phosphor.json` (`cacheWrite`, `cacheWrite1h`).
+
+**Energy** is anchored to generation. The only published figure anyone has —
+roughly 0.24 Wh for a median Gemini prompt — measures producing a reply, so
+`energyWhPerOutputToken` is exactly that, and everything else is scaled from it:
+prompt tokens and cache writes cost a fraction of a generated token (prefill is
+one batched pass; decoding runs the model once per token), cache reads cost
+less again but not nothing, and the whole lot scales with the size of the model
+that ran. A Haiku session and an Opus session are no longer the same session.
+
+**Water** is derived from that energy through `waterLPerKwh` (WUE, how data
+centres actually report it) instead of being counted off tokens a second time,
+so the two figures cannot drift apart.
+
+It is still an order-of-magnitude estimate — no vendor publishes per-token
+energy — and the card says so. What it is now is *relatively* honest: the
+comparison between two sessions, two models or two months means something.
+
+Upgrading from an older version: `energyWhPerToken` and `waterMlPerToken` are
+gone. They measured different quantities, so any value you had set is ignored
+rather than silently reinterpreted; the new keys start at their defaults.
 
 ## Build from source
 
