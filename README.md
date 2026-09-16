@@ -127,6 +127,12 @@ the `.md` summary (they write to your Desktop), restoring from the vault (it
 writes back into the agent's own store), deleting, and *fleet* — which lists
 the PCs it is about to reach over ssh before contacting any of them.
 
+The tips that scroll in the box at the top right — the help you get without
+asking for it — are written as verse, in the Italian *dolce stil novo*. The
+keys and commands inside them stay literal (`v`, `/`, `phosphor cost`): a line
+that hid the key behind a metaphor would be decoration, not help. A test keeps
+them within the box and checks that every key they promise exists.
+
 ### Mouse only
 
 Nothing needs the keyboard. **Click the words, not the letters**: every row of

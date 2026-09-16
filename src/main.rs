@@ -194,6 +194,11 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 fn usd(n: f64) -> String {
+    // `+ 0.0` normalizza lo ZERO NEGATIVO: in Rust la somma di una lista vuota
+    // di float e' -0.0 (e' l'identita' che usa `Sum`), e su uno store senza
+    // sessioni il totale veniva stampato «$-0.000». Il costo di niente non e'
+    // meno di zero.
+    let n = n + 0.0;
     if n >= 1.0 { format!("${:.2}", n) } else { format!("${:.3}", n) }
 }
 fn crop(s: &str, n: usize) -> String {
@@ -224,9 +229,11 @@ fn confirm(msg: &str) -> bool {
 
 /// Human-readable energy (Wh -> Wh / kWh) and water (mL -> mL / L).
 fn fmt_wh(wh: f64) -> String {
+    let wh = wh + 0.0; // vedi `usd`: -0.0 si stampa col segno
     if wh >= 1000.0 { format!("{:.2} kWh", wh / 1000.0) } else { format!("{:.1} Wh", wh) }
 }
 fn fmt_ml(ml: f64) -> String {
+    let ml = ml + 0.0;
     if ml >= 1000.0 { format!("{:.2} L", ml / 1000.0) } else { format!("{:.0} mL", ml) }
 }
 

@@ -165,74 +165,93 @@ const QUOTES: &[&str] = &[
     "Ogni sessione lascia un'impronta che PHOS ricorda.",
     "PHOS non scrive mai nulla senza chiedertelo.",
 ];
-
-// Short "how-to" pills that scroll in the top-right box: shortcuts, features and
-// CLI commands. Kept brief so they fit the box width. A slice → count is
-// automatic. The legend pills (↳, ● ◐ ·) double as the symbol key on screen.
+// Le pillole che scorrono nel riquadro in alto a destra: l'aiuto che si vede
+// senza chiedere niente. Sono in DOLCE STIL NOVO — endecasillabi, o quasi —
+// perché un programma che uno apre ogni giorno può permettersi di essere anche
+// bello, e perché una cosa scritta in versi si rilegge invece di scorrere via.
+//
+// La regola che le tiene oneste: il TASTO e il COMANDO restano letterali. Un
+// verso che nasconde  v  dietro una metafora smette di essere aiuto e diventa
+// decorazione. Qui la forma è antica, l'istruzione è esatta.
+//
+// Corte per forza: vengono tagliate a ~50 colonne (vedi `clip`), che è poi la
+// misura di un endecasillabo. Un test controlla che nessuna sfori.
 const TIPS: &[&str] = &[
-    "Invio o click su una riga: apri il dettaglio.",
-    "Premi  v  per leggere la conversazione.",
-    "↳ accanto al titolo = sessione ripresa/compact.",
-    "Stato:  ●  attiva   ◐  in pausa   ·  conclusa.",
-    "⏎  è il tasto Invio (apre il dettaglio).",
-    "Premi  /  per cercare in prompt, file e tool.",
-    "Premi  f  per filtrare per stato.",
-    "Premi  o  per cambiare colonna d'ordinamento.",
-    "Premi  s  per invertire l'ordine.",
-    "Click sull'intestazione: ordina per colonna.",
-    "Tab  o  1 2 3 : cambia vista.",
-    "Vista 2: aggregati per progetto.",
-    "Vista 3: andamento nel tempo.",
-    "Premi  r  per riprendere (claude --resume).",
-    "Premi  a  per sub-agenti e workflow.",
-    "Premi  e  per esportare CSV + JSON.",
-    "Premi  x  per creare un bundle .phx portabile.",
-    "Premi  i  per importare un .phx (scegli il file).",
-    "Premi  t / T  per cambiare tema.",
-    "Sette temi retro: verde, ambra, ghiaccio…",
-    "Premi  p  per la grafica 'pixel'.",
-    "Premi  m  per cambiare metrica dei grafici.",
-    "Premi  R  per un rescan immediato.",
-    "Premi  ?  o  F1  per l'aiuto completo.",
-    "Premi  q  o  Ctrl+C  per uscire.",
-    "Colonna DIMENS.: dimensione del transcript.",
-    "Colonna DATA: data dell'ultimo messaggio.",
-    "Il titolo tabella mostra la dimensione totale.",
-    "Import: non sovrascrive mai, aggiunge soltanto.",
-    "Export .phx porta transcript + sottocartelle.",
-    "Tutto è cliccabile: tab, header, bottoni, chip.",
-    "Le riprese di una conversazione si comprimono sotto [+]/[-].",
-    "Sulla riga [+]/[-]:  +  espande,  -  comprime  (o clicca il marcatore).",
-    "Premi  A  per espandere/comprimere TUTTE le riprese in un colpo.",
-    "Tasto destro su una sessione: menù con tutte le azioni.",
-    "Menù sessione: anche col tasto  .  sulla riga scelta.",
-    "La rotellina del mouse scorre la lista.",
-    "Nel dettaglio: bottoni RIPRENDI · LEGGI · AGENTI.",
-    "Resume apre un nuovo terminale dedicato.",
-    "Percorso diverso? Usa pathRemaps in phosphor.json.",
-    "Con un remap, Phosphor forka la sessione.",
-    "phosphor cost: spesa 24h / 7g / 30g.",
-    "phosphor limits: piano e reset dei limiti.",
-    "phosphor watch: monitor live dei cambi di stato.",
-    "phosphor clean: spazio disco e sessioni vuote.",
-    "phosphor find <testo>: ricerca da terminale.",
-    "phosphor --web: dashboard nel browser.",
-    "phosphor sync push: invia i bundle via git.",
-    "phosphor sync pull: recupera dagli altri PC.",
-    "Il sync è opt-in: nulla parte da solo.",
-    "Phosphor è di sola lettura sui tuoi transcript.",
-    "Nessuna dipendenza di rete: è tutto locale.",
-    "Imposta un budget mensile in phosphor.json.",
-    "Prezzi per modello modificabili in phosphor.json.",
-    "Ogni scrittura su disco chiede conferma.",
-    "Export con data nel nome: mai sovrascritti.",
-    "Home / End: vai in cima / in fondo alla lista.",
-    "PgUp / PgDn: scorri di 10 righe.",
-    "Nel lettore (v): ↑↓ e rotellina per scorrere.",
-    "AG conta sub-agenti e workflow della sessione.",
-    "Esc chiude qualsiasi finestra.",
-    "phosphor --dir <path>: altra cartella .claude.",
-    "Riprendi altrove: porta il .phx e il codice.",
+    "Un tocco in su la riga, ed ella s'apre.",
+    "Chi preme  v  legge ciò che fu detto.",
+    "↳ : questa nacque d'altra conversazione.",
+    "●  vive,  ◐  posa,  ·  è già compiuta.",
+    "⏎  è Invio, e dischiude lo dettaglio.",
+    "Con  /  cerchi ne' prompt, ne' file, ne' tool.",
+    "Con  f  riman soltanto chi ha quel stato.",
+    "Con  o  muta la colonna che dà ordine.",
+    "Con  s  l'ordine si volge al suo contrario.",
+    "Tocca l'intestazione: ordina lei.",
+    "Tab, o  1 2 3 : e si cangia la veduta.",
+    "Veduta  2 : ogni progetto in una somma.",
+    "Veduta  3 : come il tempo li dispone.",
+    "Con  r  la conversazione si riprende.",
+    "Con  a  vedi li agenti che servirono.",
+    "Con  e  si scrive in CSV e in JSON.",
+    "Con  x  fai un  .phx  che viaggia teco.",
+    "Con  i  accogli un  .phx  che altri ti diè.",
+    "Con  t  e  T  si cangiano i colori.",
+    "Sette tavolozze: verde, ambra, ghiaccio…",
+    "Con  p  il disegno si fa di quadretti.",
+    "Con  m  muti la misura de' grafici.",
+    "Con  R  si torna a legger ogni cosa.",
+    "Con  ?  s'apre l'aiuto, e tutto dice.",
+    "Con  q  ti parti, e Phosphor si congeda.",
+    "DIMENS. : quanto pesa la memoria.",
+    "DATA : l'ora de l'ultima parola.",
+    "Il titolo dice il peso di tutte insieme.",
+    "L'import non cancella: solamente aggiunge.",
+    "Il  .phx  porta seco ogni sottocartella.",
+    "Ogni cosa si tocca: nulla è sol dipinta.",
+    "Le riprese si stringon sotto  [+] / [-] .",
+    "Su quella riga:  +  apre,  -  raccoglie.",
+    "Con  A  tutte s'aprono, o tutte si serrano.",
+    "Il tasto destro chiama il menù intero.",
+    "Anche il punto  .  chiama quello stesso menù.",
+    "La rotella fa scorrere la lista.",
+    "Nel dettaglio: RIPRENDI · LEGGI · AGENTI.",
+    "Chi riprende, ha un terminale tutto suo.",
+    "Altro cammino? pathRemaps in phosphor.json.",
+    "Col remap la sessione si biforca.",
+    "phosphor cost : quanto t'è costato il dire.",
+    "phosphor cost --explain : ti mostra il conto.",
+    "phosphor limits : il piano, e quando torna.",
+    "phosphor watch : veglia, e poi t'avvisa.",
+    "phosphor clean : lo spazio, e le vuote.",
+    "phosphor find <testo> : cerca dal terminale.",
+    "phosphor --web : la stessa in un browser.",
+    "phosphor sync push : manda i tuoi fardelli.",
+    "phosphor sync pull : e li ritrova altrove.",
+    "Nulla si move se tu non lo comandi.",
+    "Phosphor legge e non tocca: solo mira.",
+    "Nulla esce di qui: ogni cosa sta in casa.",
+    "Poni un budget in phosphor.json, e ti guarda.",
+    "I prezzi son tuoi: mutali in phosphor.json.",
+    "Ogni scrittura chiede prima il tuo sì.",
+    "Ogni export ha la sua data: non si perde.",
+    "Home  e  End : al principio, e a la fine.",
+    "PgUp  e  PgDn : dieci righe per volta.",
+    "Nel lettore:  ↑↓  e rotella per scorrere.",
+    "AG : quanti agenti servirono in silenzio.",
+    "Chi clicca fuori d'una finestra, la serra.",
+    "phosphor --dir <via> : un'altra  .claude .",
+    "Per riprender altrove: il  .phx  e 'l codice.",
+    // Le cose nuove, che l'aiuto d'avvio ancora taceva.
+    "🖰 qui sotto: o sol mouse, o mouse e tasti.",
+    "Ogni riga de l'aiuto  ?  è comando: toccala.",
+    "Con  W  la tua annata si fa immagine.",
+    "Con  V  torna in vita ciò ch'era nel vault.",
+    "Con  F  domandi a li altri tuoi computer.",
+    "Con  H  la sessione si pone da parte.",
+    "vault on : e nulla più ti sarà tolto.",
+    "Claude cancella a trenta giorni: díglielo tu.",
+    "Le sessioni Codex portano il segno  ◆ .",
+    "⛁ sta nel vault;  ⚱ fu ritrovata dopo.",
 ];
 
 const SORTS: [&str; 9] = ["attività", "progetto", "titolo", "msg", "token", "costo", "agenti", "stato", "dimens"];
@@ -316,6 +335,10 @@ fn fmt_tok(n: u64) -> String {
     }
 }
 fn fmt_usd(n: f64) -> String {
+    // `+ 0.0` normalizza lo ZERO NEGATIVO: in Rust la somma di una lista vuota
+    // di float e' -0.0, ed e' esattamente il caso del primo avvio — la riga in
+    // fondo diceva «$-0.000 costo» a chi non aveva ancora nessuna sessione.
+    let n = n + 0.0;
     if n >= 1.0 {
         format!("${:.2}", n)
     } else {
@@ -4929,6 +4952,57 @@ mod tree_tests {
     }
 
     #[test]
+    fn the_cost_of_nothing_is_not_minus_zero() {
+        // In Rust la somma di una lista vuota di float e' -0.0 (e' l'identita'
+        // che usa `Sum`), quindi con nessuna sessione la riga in fondo diceva
+        // «$-0.000 costo». Lo vedeva solo chi apre Phosphor per la prima volta,
+        // cioe' esattamente la persona che non sa ancora se fidarsi dei numeri.
+        let empty: Vec<f64> = vec![];
+        let sum: f64 = empty.iter().sum();
+        assert!(sum.is_sign_negative(), "e' proprio -0.0: il difetto nasce qui");
+        assert_eq!(fmt_usd(sum), "$0.000");
+        assert_eq!(fmt_usd(-0.0), "$0.000");
+        // E i valori veri non vengono toccati.
+        assert_eq!(fmt_usd(0.5), "$0.500");
+        assert_eq!(fmt_usd(12.345), "$12.35");
+    }
+
+    #[test]
+    fn the_verses_fit_the_box_and_still_name_the_key() {
+        // Le pillole sono in versi, ma restano aiuto: se una viene tagliata a
+        // metà perde proprio la fine, dove di solito sta la cosa da fare. E un
+        // verso che nascondesse il tasto dietro una metafora sarebbe
+        // decorazione, non istruzione.
+        //
+        // 51 colonne e' la larghezza del riquadro su un terminale da 120 (vedi
+        // `clip` in render_hero): il logo ne prende 52, la colonna di destra 13.
+        const W: usize = 51;
+        for t in TIPS {
+            assert!(
+                t.chars().count() <= W,
+                "«{t}» e' lungo {} caratteri: verrebbe tagliato",
+                t.chars().count()
+            );
+            assert!(!t.trim().is_empty());
+        }
+        // I tasti e i comandi che i versi promettono devono esistere davvero.
+        let all = TIPS.join("\n");
+        for token in [
+            "  v  ", "  /  ", "  f  ", "  r  ", "  a  ", "  e  ", "  x  ", "  i  ", "  p  ",
+            "  m  ", "  R  ", "  ?  ", "  q  ", "  A  ", "  W  ", "  V  ", "  F  ", "  H  ",
+            "phosphor cost", "phosphor find", "phosphor --web", "vault on",
+        ] {
+            assert!(all.contains(token), "nessun verso insegna «{}»", token.trim());
+        }
+        // Nessun doppione: sessanta versi si controllano male a occhio.
+        let mut seen: Vec<&str> = TIPS.to_vec();
+        seen.sort_unstable();
+        let n = seen.len();
+        seen.dedup();
+        assert_eq!(seen.len(), n, "c'e' un verso ripetuto");
+    }
+
+    #[test]
     fn a_long_confirmation_is_not_cut_off_on_a_short_terminal() {
         // La domanda sulla retention e il benvenuto hanno quattordici righe. Con
         // l'altezza fissa al 50%, su un terminale da 24 righe sparivano le
@@ -5294,5 +5368,6 @@ mod tree_tests {
         assert_eq!(app.all[meta.root].title, "Build the thing");
     }
 }
+
 
 
