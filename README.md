@@ -68,7 +68,7 @@ on your PATH. To compile from source, see [Build](#build-from-source).
 | `ls` | print a table of sessions and exit |
 | `json` | print sessions as JSON (scriptable) and exit |
 | `find <text>` | search prompts, files and tools across all sessions |
-| `cost` | estimated spend 24h / 7d / 30d, budget and top projects |
+| `cost` | estimated spend 24h / 7d / 30d, budget and top projects. Add `--explain` to print the whole chain — tokens per model → price → Wh → litres — so the estimate can be checked instead of trusted |
 | `limits` | plan (e.g. Max 20x) and limit-window reset |
 | `wrapped` | a shareable card of your year on the Desktop, **PNG and SVG** — tokens, cost, energy, water, and how many times you had to correct the agent. Anonymous by default: numbers only |
 | `mcp` | MCP server (stdio) giving Claude recall over your past sessions |
@@ -92,6 +92,7 @@ on your PATH. To compile from source, see [Build](#build-from-source).
 | `--port <n>` | web dashboard port (default 8787) |
 | `--watch <sec>` | live re-scan interval (default 5) |
 | `--no-open` | with `--web`: do not open the browser |
+| `--explain` | with `cost`: write out the arithmetic behind every figure |
 | `--running` | with `ls` / `json` / `export-all`: live sessions only |
 | `--project <txt>` | with `ls` / `json` / `export-all`: filter by project name |
 | `--out <file>` | with `export-all`: path of the `.phx` file to create |
@@ -102,8 +103,9 @@ on your PATH. To compile from source, see [Build](#build-from-source).
 
 ## Shortcuts (TUI)
 
-Press `?` or `F1` in-app for the full help. Everything is clickable with the
-mouse too.
+Press `?` or `F1` in-app for the full help. You never have to learn any of
+this: every one of these actions is also a thing you can click — see
+[Mouse only](#mouse-only).
 
 | Key | Action | | Key | Action |
 |---|---|---|---|---|
@@ -119,12 +121,39 @@ mouse too.
 | `W` | Wrapped card (PNG + SVG) on the Desktop | | | |
 | `q` / `Ctrl+C` | quit | | | |
 
-The *Resume*, *export* and *import* actions show what they will do first and ask
-for confirmation (`s` to confirm, `Esc` to cancel).
+Anything that leaves a mark says what it will do and waits for a yes (`s` to
+confirm, `Esc` to cancel): *resume*, *export*, *import*, the Wrapped card and
+the `.md` summary (they write to your Desktop), restoring from the vault (it
+writes back into the agent's own store), deleting, and *fleet* — which lists
+the PCs it is about to reach over ssh before contacting any of them.
 
-**Mouse:** click a row to open its detail; click a column header to sort; click
-the tabs to switch view; the metric buttons, the bottom bar chips and the theme
-swatches in the help are all clickable too.
+### Mouse only
+
+Nothing needs the keyboard. **Click the words, not the letters**: every row of
+the help is a command, so `read the transcript in-app` opens the transcript —
+you never have to know it was `v`. Click a row to open its detail, a column
+header to sort, a tab to switch view; the metric buttons, the bottom bar and
+the theme swatches all respond. **Clicking outside a panel closes it**, which
+is the one gesture worth remembering, and the only way out you need.
+
+The chip at the bottom right toggles the two modes:
+
+| Mode | The bottom bar reads | For |
+|---|---|---|
+| `mouse+tasti` | `[⏎ apri] [v leggi]` | knowing the shortcut while you click |
+| `solo mouse` | `[apri] [leggi]` | when the letters are just noise |
+
+The keys keep working in both — the mode only decides whether the bar shows
+them. The choice is remembered in `phosphor.json` (`mouseOnly`).
+
+The bar wraps to a second row rather than dropping the commands that do not
+fit: at 120 columns it used to swallow the whole last group, and a command that
+is simply absent is not something anyone notices is missing.
+
+**First run.** Three screens introduce the list, the click-anywhere model and
+what Phosphor will and will not do on its own. `AVANTI` / `SALTA`, both
+clickable; it does not come back (`tourDone` in `phosphor.json`). If the
+retention question is due, that comes first — it is about losing work.
 
 ## What it shows
 
@@ -440,7 +469,7 @@ writes these files (inside `.claude` and, for exports, on the Desktop):
 | File | Contents |
 |---|---|
 | `phosphor.json` | the configuration (theme, prices, budget…), atomic write |
-| `.phosphor-cache.v7.jsonl` | scan cache, regenerable (rewritten on each scan) |
+| `.phosphor-cache.<key>.jsonl` | scan cache, regenerable (rewritten on each scan). The key is a fingerprint of the modules that produce a cached row, so a build that parses differently reads a different file instead of trusting stale results; caches of other builds are cleared on the next scan |
 | `phosphor-vault/` | hard links to your transcripts, only if you ran `vault on` (no extra bytes; see [The vault](#the-vault--keep-transcripts-for-zero-extra-bytes)) |
 | `Desktop\phosphor-export-*` | CSV/JSON of the current view (timestamped, never overwrites) |
 | `Desktop\phosphor-wrapped-*` | the Wrapped card, PNG + SVG (timestamped, never overwrites) |
@@ -458,12 +487,21 @@ it keeps lives in `~/.claude` as above. `auth.json` is never opened.
 
 `~/.claude/phosphor.json` (created on first run): per-model prices (editable
 without recompiling — `opus` / `sonnet` / `haiku` for Claude Code, `gpt` for
-Codex, `default` for anything else), default `theme` and `pixel`, `watch` interval, monthly
+Codex, `default` for anything else), default `theme` and `pixel`, `mouseOnly` for the mouse-only bottom bar,
+`watch` interval, monthly
 `budget` for alerts, `pathRemaps` for cross-PC resume, `syncRepo` /
 `syncEncrypt` / `syncIdentity` for the optional git sync, your `favorites`
 and `notes`, `vault` for the hard-link vault (off by default),
+`tourDone` for the first-run introduction,
 and `energyWhPerOutputToken` / `waterLPerKwh` for the footprint estimate shown
 by `cost`, in the detail view and on the Wrapped card.
+
+`pricesAsOf` is the day the price list was last checked (ISO `YYYY-MM-DD`).
+After six months Phosphor says so, next to the cost and in the status line,
+because a total computed on last year's prices looks exactly like a correct
+one — and whoever opens Phosphor to find out what they spent is precisely the
+person who does not know the list has moved. Update the prices and the date
+together.
 
 Seven retro palettes cycled with `t` / `T`: phosphor (green), amber, ice,
 synthwave, matrix, red, blue. The chosen theme is saved.

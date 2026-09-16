@@ -272,52 +272,21 @@ const A_ARCHIVE: u16 = 32;
 const A_FLEET: u16 = 33;
 const A_VAULT_RESTORE: u16 = 34;
 const A_WRAPPED: u16 = 35;
+const A_MOUSE_MODE: u16 = 36;
 
-struct Theme {
-    fg: Color,
-    dim: Color,
-    accent: Color,
-    bg: Color,
-    run: Color,
-    idle: Color,
-    /// Second agent (Codex). Deliberately off the theme's own hue in every
-    /// palette so the two agents never read as the same family of rows —
-    /// colour alone is not the whole signal (see the `◆` marker), but it is
-    /// what makes them separable at a glance while scrolling.
-    alt: Color,
-}
+// I temi vivono in un file loro: una tavolozza non tocca lo stato
+// dell'applicazione, ed e' uno dei pochi punti di questo file con una
+// giuntura vera.
+mod bar;
+mod help;
+mod theme;
+pub use theme::{theme_index, THEME_COUNT, THEME_NAMES};
+use bar::{render_shortcut_bar, shortcut_bar_height};
+// Usati solo dai test che controllano che ogni voce disegnata sia cliccabile.
+#[cfg(test)]
+use bar::{place_chips, shortcut_chips, BAR_MAX_LINES};
+use theme::{theme, Theme};
 
-pub const THEME_NAMES: [&str; 7] =
-    ["fosfori", "ambra", "ghiaccio", "synthwave", "matrix", "rosso", "blu"];
-pub const THEME_COUNT: usize = THEME_NAMES.len();
-
-pub fn theme_index(name: &str) -> usize {
-    match name.to_lowercase().as_str() {
-        "fosfori" | "green" | "verde" => 0,
-        "ambra" | "amber" => 1,
-        "ghiaccio" | "cyan" | "ice" => 2,
-        "synthwave" | "wave" => 3,
-        "matrix" => 4,
-        "rosso" | "red" => 5,
-        "blu" | "blue" => 6,
-        _ => 0,
-    }
-}
-
-fn rgb(r: u8, g: u8, b: u8) -> Color {
-    Color::Rgb(r, g, b)
-}
-fn theme(idx: usize) -> Theme {
-    match idx % THEME_COUNT {
-        1 => Theme { fg: rgb(255, 176, 0), dim: rgb(122, 85, 16), accent: rgb(255, 224, 138), bg: rgb(12, 8, 2), run: rgb(255, 210, 74), idle: rgb(185, 132, 42), alt: rgb(120, 200, 255) },
-        2 => Theme { fg: rgb(120, 230, 255), dim: rgb(40, 110, 140), accent: rgb(190, 250, 255), bg: rgb(4, 10, 16), run: rgb(90, 235, 200), idle: rgb(255, 210, 120), alt: rgb(255, 190, 120) },
-        3 => Theme { fg: rgb(255, 120, 200), dim: rgb(120, 50, 110), accent: rgb(120, 230, 255), bg: rgb(20, 7, 30), run: rgb(120, 255, 180), idle: rgb(255, 215, 120), alt: rgb(160, 255, 170) },
-        4 => Theme { fg: rgb(0, 255, 70), dim: rgb(0, 110, 40), accent: rgb(170, 255, 120), bg: rgb(0, 8, 0), run: rgb(120, 255, 160), idle: rgb(200, 255, 120), alt: rgb(120, 210, 255) },
-        5 => Theme { fg: rgb(255, 95, 85), dim: rgb(130, 42, 38), accent: rgb(255, 185, 120), bg: rgb(16, 4, 4), run: rgb(255, 145, 120), idle: rgb(255, 200, 120), alt: rgb(150, 220, 255) },
-        6 => Theme { fg: rgb(120, 185, 255), dim: rgb(50, 80, 140), accent: rgb(190, 215, 255), bg: rgb(4, 8, 22), run: rgb(120, 255, 205), idle: rgb(255, 215, 120), alt: rgb(255, 190, 130) },
-        _ => Theme { fg: rgb(59, 240, 106), dim: rgb(31, 122, 58), accent: rgb(200, 255, 50), bg: rgb(7, 10, 7), run: rgb(91, 255, 143), idle: rgb(255, 204, 51), alt: rgb(255, 170, 220) },
-    }
-}
 
 fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
@@ -492,6 +461,48 @@ fn minibar(v: f64, max: f64, cells: usize) -> String {
 fn hit(r: Rect, col: u16, row: u16) -> bool {
     row == r.y && col >= r.x && col < r.x + r.width
 }
+/// Whole-area hit test. [`hit`] deliberately checks a single ROW because the
+/// things it tests are one-line chips; using it on a panel would make every
+/// click below the top border count as a click *outside* the panel.
+fn within(r: Rect, col: u16, row: u16) -> bool {
+    col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height
+}
+
+/// The clickable regions that run a command: a rectangle and an action code.
+///
+/// One type, because the defect worth closing is that every surface used to
+/// register its own way and the mouse handler had to remember how. The bar was
+/// the proof: it kept its rectangles correctly and was then read behind a
+/// `row == bar.y` guard, so the second row of chips was drawn, registered and
+/// unreachable. Here the rectangles ARE the guard.
+#[derive(Default)]
+struct Hotspots(Vec<(Rect, u16)>);
+
+impl Hotspots {
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+    /// Register a region. Action 0 means "no command" — registering it would
+    /// make a thing that looks clickable, clicks, and does nothing.
+    fn push(&mut self, r: Rect, action: u16) {
+        if action != 0 && r.width > 0 && r.height > 0 {
+            self.0.push((r, action));
+        }
+    }
+    fn at(&self, col: u16, row: u16) -> Option<u16> {
+        self.0.iter().find(|(r, _)| within(*r, col, row)).map(|(_, a)| *a)
+    }
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    /// Where a given action can be clicked. Used by the tests that check that
+    /// everything drawn can in fact be reached.
+    #[cfg(test)]
+    fn rect_of(&self, action: u16) -> Option<Rect> {
+        self.0.iter().find(|(_, a)| *a == action).map(|(r, _)| *r)
+    }
+}
 /// Border style: chunky quadrant blocks in pixel mode, double lines otherwise.
 fn btype(pixel: bool) -> BorderType {
     if pixel { BorderType::QuadrantOutside } else { BorderType::Double }
@@ -539,6 +550,14 @@ struct App {
     remotes: Vec<String>, // ssh aliases of the user's other PCs (fleet view, key F)
     fleet: Vec<Session>,  // remote sessions from the last fleet fetch (host != "")
     fleet_tx: Option<mpsc::Sender<FleetMsg>>, // handed to fetch threads by run()
+    /// Where a re-scan sends its result: the same channel the periodic watcher
+    /// uses, so both arrive by the same road. Handed over by `run()`.
+    scan_tx: Option<mpsc::Sender<Vec<Session>>>,
+    /// Il giro di presentazione non e' ancora stato visto ne' saltato.
+    tour_todo: bool,
+    /// A re-scan is in flight. Only to avoid piling up threads when someone
+    /// leans on `R`, and to have something honest to put in the status line.
+    scanning: bool,
     fleet_gen: u64,       // fetch generation (stale results are dropped)
     fleet_expect: usize,  // hosts queried in the current generation
     fleet_got: usize,     // hosts answered (ok or error) so far
@@ -576,7 +595,17 @@ struct App {
     rect_tabs: Rect,
     rect_table: Rect,
     rect_shortcut: Rect,
-    shortcut_groups: Vec<(Rect, u16)>,
+    /// Il riquadro dell'overlay attualmente disegnato. Una sola definizione di
+    /// "dentro la finestra": chi disegna un pannello lo registra qui, e il
+    /// gestore del mouse sa cosa vuol dire cliccare FUORI senza doverlo
+    /// ricalcolare per ognuno.
+    rect_overlay: Rect,
+    /// Le righe dell'aiuto che sono anche comandi: riquadro e azione. Vuoto
+    /// per le righe di sola legenda, che non fanno nulla se cliccate.
+    rect_help_actions: Hotspots,
+    /// Vedi `config::Config::mouse_only`.
+    mouse_only: bool,
+    shortcut_groups: Hotspots,
     rect_sort_headers: Vec<(Rect, usize)>,
     rect_metric_buttons: Vec<Rect>,
     rect_detail_buttons: Vec<Rect>,
@@ -666,6 +695,17 @@ enum Pending {
     /// Alza cleanupPeriodDays di Claude Code. $days = 0 significa "lascia
     /// com'e'": non tocca nulla, ma smette di chiedere.
     SetRetention { days: u64 },
+    /// Scrive la card sul Desktop.
+    Wrapped,
+    /// Contatta gli altri PC via ssh: esce dalla macchina, quindi si chiede.
+    Fleet,
+    /// Rimette un transcript nel magazzino del suo agente.
+    VaultRestore,
+    /// Mostra la pagina `n` del giro di presentazione, o lo chiude quando le
+    /// pagine sono finite.
+    Tour(u8),
+    /// Il giro e' stato visto o saltato: non si ripresenta.
+    TourDone,
     ExportBundle { out: PathBuf },
     ImportBundle { src: PathBuf },
     ArchiveProject { dir: PathBuf, name: String },
@@ -684,6 +724,13 @@ struct Confirm {
     /// binario — la prima domanda che Phosphor fa all'utente è "per quanti
     /// giorni?", e ridurla a sì/no la renderebbe un'altra domanda.
     alts: Vec<(char, Pending)>,
+    /// Etichette dei due bottoni, quando «CONFERMA / ANNULLA» non descrive la
+    /// scelta. Il giro di presentazione le usa per «AVANTI / SALTA»: chiedere
+    /// «conferma» a chi sta leggendo una spiegazione non vuol dire niente.
+    buttons: Option<(&'static str, &'static str)>,
+    /// Cosa fare sul secondo bottone. Di norma niente — si annulla e basta —
+    /// ma «salta il giro» deve comunque ricordarsi di essere stato saltato.
+    cancel: Option<Pending>,
 }
 
 /// The "delete an entire project" flow — the most destructive action in the app,
@@ -743,19 +790,31 @@ impl App {
         let notes: HashMap<String, String> = fav_cfg.notes.into_iter().collect();
         let aliases: HashMap<String, String> = fav_cfg.aliases.into_iter().collect();
         let energy_wh_per_output_token = fav_cfg.energy_wh_per_output_token;
+        let mouse_only_cfg = fav_cfg.mouse_only;
         let water_l_per_kwh = fav_cfg.water_l_per_kwh;
+        // Un listino vecchio non si vede: i costi restano plausibili e sono
+        // sbagliati. Se e' il caso, lo dice la prima riga di stato, una volta.
+        let prices_stale =
+            crate::config::prices_warning(&fav_cfg.prices_as_of, &crate::config::today_iso());
         let mut a = App {
             base, cache, prices, budget, remaps, sync_repo, watch,
-            remotes: fav_cfg.remotes, fleet: vec![], fleet_tx: None, fleet_gen: 0, fleet_expect: 0, fleet_got: 0,
+            remotes: fav_cfg.remotes, fleet: vec![], fleet_tx: None, scan_tx: None, scanning: false, tour_todo: !fav_cfg.tour_done, fleet_gen: 0, fleet_expect: 0, fleet_got: 0,
             favorites, marked: HashSet::new(), notes, aliases, note_editing: false, note_is_alias: false, note_buf: String::new(),
             energy_wh_per_output_token, water_l_per_kwh, all,
             view: vec![], tab: 0, ts: TableState::default(),
             search: String::new(), searching: false, state_filter: 0, metric: 0,
             sort_col: 0, sort_desc: true, theme_idx, pixel,
             detail: false, help: false, show_agents: false, agents: vec![],
-            status: String::from("pronto · ? aiuto"), blink: true, dry: false,
+            status: match &prices_stale {
+                Some(w) => format!("⚠ {w}"),
+                None => String::from("pronto · ? aiuto"),
+            },
+            blink: true, dry: false,
             rect_tabs: Rect::default(), rect_table: Rect::default(), rect_shortcut: Rect::default(),
-            shortcut_groups: vec![], rect_sort_headers: vec![], rect_metric_buttons: vec![],
+            rect_overlay: Rect { x: 0, y: 0, width: 0, height: 0 },
+            rect_help_actions: Hotspots::default(),
+            mouse_only: mouse_only_cfg,
+            shortcut_groups: Hotspots::default(), rect_sort_headers: vec![], rect_metric_buttons: vec![],
             rect_detail_buttons: vec![], rect_agents_close: Rect::default(), rect_theme_buttons: vec![],
             confirm: None, rect_confirm_buttons: vec![], detail_opened_ms: 0, plan, help_scroll: 0,
             picker: None, rect_picker_list: Rect::default(),
@@ -1061,7 +1120,7 @@ impl App {
             "Solo i transcript scelti (+ le loro sottocartelle),".into(),
             "confinati a projects/. Nessun altro file toccato.".into(),
         ];
-        self.confirm = Some(Confirm { title: " CONFERMA CANCELLA SELEZIONE ".into(), lines, action: Pending::DeleteMarked { paths }, alts: Vec::new() });
+        self.confirm = Some(Confirm { title: " CONFERMA CANCELLA SELEZIONE ".into(), lines, action: Pending::DeleteMarked { paths }, alts: Vec::new(), buttons: None, cancel: None });
     }
     /// Perform the bulk delete (already confirmed): remove each file confined to
     /// projects/, drop them from the view, clear the selection.
@@ -1130,6 +1189,115 @@ impl App {
         }
         self.status = format!("apro  {}", clip(&dir, 44));
     }
+    /// Ask before the fleet fetch: it is the only action that leaves this
+    /// machine. It opens an ssh connection to every registered PC and runs a
+    /// command there — harmless, but the user should know it is happening
+    /// rather than discover it from their firewall.
+    fn request_fleet(&mut self) {
+        if self.dry {
+            return;
+        }
+        let aliases = crate::config::load(&self.base).remotes;
+        if aliases.is_empty() {
+            self.status = "nessun PC registrato:  phosphor remote add <alias>".into();
+            return;
+        }
+        let mut lines = vec![
+            "Mi collego via ssh a questi PC e chiedo le loro sessioni:".into(),
+            String::new(),
+        ];
+        for a in aliases.iter().take(8) {
+            lines.push(format!("  ssh {a} — phosphor json"));
+        }
+        lines.push(String::new());
+        lines.push("È l'unica cosa che esce da questa macchina. Sola lettura:".into());
+        lines.push("niente viene scritto sugli altri PC.".into());
+        self.confirm = Some(Confirm {
+            title: " CONFERMA INTERROGA FLOTTA ".into(),
+            lines,
+            action: Pending::Fleet,
+            alts: Vec::new(), buttons: None, cancel: None,
+        });
+    }
+
+    /// Ask before restoring from the vault: it writes into the agent's own
+    /// store, which is the one place Phosphor otherwise never touches.
+    fn request_vault_restore(&mut self) {
+        if self.dry {
+            return;
+        }
+        let s = match self.selected() {
+            Some(s) if s.is_vaulted() => s.clone(),
+            Some(_) => {
+                self.status = "V vale solo sulle righe ⛁ (quelle salvate dal vault)".into();
+                return;
+            }
+            None => return,
+        };
+        let agent = if s.is_codex() { "Codex" } else { "Claude Code" };
+        let cmd = if s.is_codex() { "codex resume" } else { "claude --resume" };
+        self.confirm = Some(Confirm {
+            title: " CONFERMA RIPRISTINA DAL VAULT ".into(),
+            lines: vec![
+                format!("Rimetto questo transcript nel magazzino di {agent},"),
+                "da cui era stato cancellato:".into(),
+                String::new(),
+                format!("  {}", clip(&s.title.replace('\n', " "), 56)),
+                String::new(),
+                "È un hard link, non una copia: zero byte in più, e il vault".into(),
+                "tiene comunque il suo. Non sovrascrive mai nulla.".into(),
+                String::new(),
+                format!("Dopo, {cmd} la ritrova."),
+            ],
+            action: Pending::VaultRestore,
+            alts: Vec::new(), buttons: None, cancel: None,
+        });
+    }
+
+    /// Switch between "mouse + tasti" and "solo mouse", and remember it.
+    ///
+    /// The two are not the same interface with a setting flipped. In mouse-only
+    /// the bar stops leading with the key and leads with the WORD, because a
+    /// letter you are not going to press is noise; the help becomes the place
+    /// commands are run from rather than a list to memorise. The keys keep
+    /// working either way — taking them away from someone who knows them would
+    /// be a loss, not a simplification.
+    fn toggle_mouse_mode(&mut self) {
+        self.mouse_only = !self.mouse_only;
+        if !self.dry {
+            let mut cfg = crate::config::load(&self.base);
+            cfg.mouse_only = self.mouse_only;
+            crate::config::save(&self.base, &cfg);
+        }
+        self.status = if self.mouse_only {
+            "solo mouse: clicca le voci in basso, o ? per l'elenco completo cliccabile".into()
+        } else {
+            "mouse + tasti: le lettere sono di nuovo in evidenza".into()
+        };
+    }
+
+    /// Ask before writing the Wrapped card: it drops two files on the Desktop,
+    /// and every other action that writes there already asks.
+    fn request_wrapped(&mut self) {
+        if self.dry {
+            return;
+        }
+        self.confirm = Some(Confirm {
+            title: " CONFERMA CARD WRAPPED ".into(),
+            lines: vec![
+                "Scrivo sul Desktop due file NUOVI (mai sovrascritti):".into(),
+                String::new(),
+                "  phosphor-wrapped-<anno>.png   da condividere".into(),
+                "  phosphor-wrapped-<anno>.svg   vettoriale".into(),
+                String::new(),
+                "La card è anonima: solo numeri, nessun nome di progetto".into(),
+                "né percorso né testo dei prompt.".into(),
+            ],
+            action: Pending::Wrapped,
+            alts: Vec::new(), buttons: None, cancel: None,
+        });
+    }
+
     /// Write the Wrapped card to the Desktop, without leaving the list.
     ///
     /// It used to be CLI-only, which meant quitting the app to get the one
@@ -1207,7 +1375,104 @@ impl App {
                 ('2', Pending::SetRetention { days: 365 }),
                 ('3', Pending::SetRetention { days: 0 }),
             ],
+            buttons: None,
+            cancel: None,
         });
+    }
+
+    /// Le pagine del giro di presentazione. Tre, e si chiudono cliccando.
+    ///
+    /// Serve a una cosa sola: che un collega apra Phosphor per la prima volta e
+    /// sappia cosa fare senza leggere il README. Per questo e' scritto in
+    /// termini di cose da CLICCARE, non di tasti — i tasti li trova dopo, se li
+    /// vuole, e intanto il programma e' gia' utilizzabile.
+    const TOUR_PAGES: usize = 3;
+
+    fn tour_page(&mut self, page: u8) {
+        let (title, lines): (&str, Vec<String>) = match page {
+            0 => (
+                " BENVENUTO — 1 di 3: LA LISTA ",
+                vec![
+                    "Ogni riga è una sessione di lavoro con un agente:".into(),
+                    "Claude Code e Codex CLI, nella stessa lista.".into(),
+                    String::new(),
+                    "  • clicca una riga        → apri la sessione".into(),
+                    "  • clicca un'intestazione → ordina per quella colonna".into(),
+                    "  • tasto destro su una riga → tutte le azioni su quella".into(),
+                    String::new(),
+                    "I pallini a sinistra dicono com'è finita: ● viva, ◐ ferma,".into(),
+                    "· conclusa. ⛁ è al sicuro nel vault, ⚱ è stata recuperata".into(),
+                    "dopo che l'agente l'aveva già cancellata.".into(),
+                ],
+            ),
+            1 => (
+                " BENVENUTO — 2 di 3: SI FA TUTTO COL MOUSE ",
+                vec![
+                    "Non serve imparare nessuna scorciatoia.".into(),
+                    String::new(),
+                    "  • l'elenco completo dei comandi è il pannello  ?".into(),
+                    "    e ogni sua riga È il comando: clicchi la descrizione".into(),
+                    "    e parte. Non devi sapere che era la lettera «v».".into(),
+                    String::new(),
+                    "  • per chiudere qualunque finestra: CLICCA FUORI.".into(),
+                    "    È l'unico gesto che vale la pena ricordare.".into(),
+                    String::new(),
+                    "In basso c'è l'interruttore fra le due modalità:".into(),
+                    "«mouse+tasti» mostra anche le lettere mentre clicchi,".into(),
+                    "«solo mouse» le toglie di mezzo. I tasti funzionano".into(),
+                    "comunque in entrambe.".into(),
+                ],
+            ),
+            _ => (
+                " BENVENUTO — 3 di 3: NIENTE ALLE TUE SPALLE ",
+                vec![
+                    "Phosphor legge e basta. Non modifica i transcript e non".into(),
+                    "manda niente in rete di sua iniziativa.".into(),
+                    String::new(),
+                    "Tutto ciò che scrive un file, contatta un altro PC o".into(),
+                    "cancella qualcosa te lo dice PRIMA e aspetta un sì.".into(),
+                    String::new(),
+                    "Una cosa che vale la pena sapere subito: Claude Code".into(),
+                    "cancella i suoi transcript dopo 30 giorni, da solo e".into(),
+                    "senza cestino. Per tenerli vivi senza occupare spazio:".into(),
+                    "    phosphor vault on".into(),
+                    String::new(),
+                    "Buon lavoro. Questo giro non si ripresenta; l'aiuto  ?".into(),
+                    "c'è sempre.".into(),
+                ],
+            ),
+        };
+        let last = page as usize + 1 >= Self::TOUR_PAGES;
+        self.confirm = Some(Confirm {
+            title: title.into(),
+            lines,
+            action: if last { Pending::TourDone } else { Pending::Tour(page + 1) },
+            alts: Vec::new(),
+            buttons: Some(if last { ("INIZIA", "CHIUDI") } else { ("AVANTI", "SALTA") }),
+            cancel: Some(Pending::TourDone),
+        });
+    }
+
+    /// Mostra il giro se non è ancora stato visto. Chiamata a ogni giro del
+    /// ciclo principale, ma costa due `bool`: la domanda sulla retention arriva
+    /// prima e occupa la modale, quindi il giro deve poter aspettare il suo
+    /// turno invece di essere saltato per sempre.
+    fn maybe_show_tour(&mut self) {
+        if !self.tour_todo || self.confirm.is_some() || self.dry {
+            return;
+        }
+        self.tour_page(0);
+    }
+
+    fn finish_tour(&mut self) {
+        self.tour_todo = false;
+        self.confirm = None;
+        if !self.dry {
+            let mut cfg = crate::config::load(&self.base);
+            cfg.tour_done = true;
+            crate::config::save(&self.base, &cfg);
+        }
+        self.status = "pronto · ? per l'elenco completo, cliccabile".into();
     }
 
     /// Apply the answer to [`maybe_ask_retention`]. `days == 0` means "leave it
@@ -1300,7 +1565,7 @@ impl App {
             String::new(),
             format!("  {}  →  archived/", clip(&dir.display().to_string(), 52)),
         ];
-        self.confirm = Some(Confirm { title: " CONFERMA ARCHIVIA ".into(), lines, action: Pending::ArchiveProject { dir, name }, alts: Vec::new() });
+        self.confirm = Some(Confirm { title: " CONFERMA ARCHIVIA ".into(), lines, action: Pending::ArchiveProject { dir, name }, alts: Vec::new(), buttons: None, cancel: None });
     }
     /// Perform the archive (already confirmed), then drop the project's sessions
     /// from the live view.
@@ -1433,14 +1698,45 @@ impl App {
         let cur = self.ts.selected().unwrap_or(0) as i64;
         self.ts.select(Some((cur + delta).clamp(0, n - 1) as usize));
     }
+    /// Re-scan on demand (`R`), off the drawing thread.
+    ///
+    /// It used to run right here, which meant the window stopped answering —
+    /// including the click-outside gesture — for as long as the store took to
+    /// read, with nothing on screen to say why. The periodic watcher had been
+    /// on its own thread all along; this just sends `R` down the same road,
+    /// and the result arrives on the same channel.
     fn rescan_now(&mut self) {
         if self.dry { return; }
-        let (mut s, changed) = { let mut c = self.cache.lock().unwrap(); crate::scan_all(&self.base, &mut c) };
-        live::annotate(&self.base, &mut s);
-        if changed { cache::save(&self.base, &s); }
-        crate::add_recovered(&self.base, &mut s);
-        self.set_sessions(s);
-        self.status = "scan completato".into();
+        if self.scanning {
+            self.status = "sto gia' rileggendo…".into();
+            return;
+        }
+        let tx = match self.scan_tx.clone() {
+            Some(tx) => tx,
+            // No channel means nobody is listening (tests, or a caller that
+            // drives the App directly): do it here rather than silently not
+            // at all.
+            None => {
+                let (mut s, changed) = { let mut c = self.cache.lock().unwrap(); crate::scan_all(&self.base, &mut c) };
+                live::annotate(&self.base, &mut s);
+                if changed { cache::save(&self.base, &s); }
+                crate::add_recovered(&self.base, &mut s);
+                self.set_sessions(s);
+                self.status = "scan completato".into();
+                return;
+            }
+        };
+        let base = self.base.clone();
+        let cache = self.cache.clone();
+        self.scanning = true;
+        self.status = "rilettura in corso… (la finestra resta viva)".into();
+        std::thread::spawn(move || {
+            let (mut s, changed) = { let mut c = cache.lock().unwrap(); crate::scan_all(&base, &mut c) };
+            live::annotate(&base, &mut s);
+            if changed { cache::save(&base, &s); }
+            crate::add_recovered(&base, &mut s);
+            let _ = tx.send(s);
+        });
     }
     /// Ask before exporting: build unique timestamped paths (so nothing existing
     /// is ever overwritten) and show a confirmation that names both files.
@@ -1458,7 +1754,7 @@ impl App {
             String::new(),
             "Nome con data/ora: nessun file esistente verrà sovrascritto.".into(),
         ];
-        self.confirm = Some(Confirm { title: " CONFERMA EXPORT ".into(), lines, action: Pending::Export { csv, json }, alts: Vec::new() });
+        self.confirm = Some(Confirm { title: " CONFERMA EXPORT ".into(), lines, action: Pending::Export { csv, json }, alts: Vec::new(), buttons: None, cancel: None });
     }
     /// Actually write the export to the (already confirmed) paths.
     fn do_export(&mut self, csv_path: PathBuf, json_path: PathBuf) {
@@ -1541,7 +1837,7 @@ impl App {
                     "claude riprenderà LÀ, nella cartella giusta di quel PC.".into(),
                     "(serve phosphor+claude installati e ssh raggiungibile)".into(),
                 ];
-                self.confirm = Some(Confirm { title: " CONFERMA RIPRENDI REMOTO ".into(), lines, action: Pending::RemoteResume { host, id }, alts: Vec::new() });
+                self.confirm = Some(Confirm { title: " CONFERMA RIPRENDI REMOTO ".into(), lines, action: Pending::RemoteResume { host, id }, alts: Vec::new(), buttons: None, cancel: None });
                 return;
             }
         }
@@ -1590,7 +1886,7 @@ impl App {
                 "remap applicato → uso --fork-session (sessione derivata).".to_string()
             });
         }
-        self.confirm = Some(Confirm { title: " CONFERMA RIPRENDI ".into(), lines, action: Pending::Resume { id, cwd, fork, codex }, alts: Vec::new() });
+        self.confirm = Some(Confirm { title: " CONFERMA RIPRENDI ".into(), lines, action: Pending::Resume { id, cwd, fork, codex }, alts: Vec::new(), buttons: None, cancel: None });
     }
     /// Actually spawn the resume terminal (already confirmed).
     fn do_resume_now(&mut self, id: String, cwd: String, fork: bool, codex: bool) {
@@ -1627,7 +1923,7 @@ impl App {
             String::new(),
             "File NUOVO con data nel nome: non sovrascrive nulla.".into(),
         ];
-        self.confirm = Some(Confirm { title: " CONFERMA EXPORT PORTABILE ".into(), lines, action: Pending::ExportBundle { out }, alts: Vec::new() });
+        self.confirm = Some(Confirm { title: " CONFERMA EXPORT PORTABILE ".into(), lines, action: Pending::ExportBundle { out }, alts: Vec::new(), buttons: None, cancel: None });
     }
     /// Actually build and write the bundle (already confirmed). With a
     /// multi-selection active it bundles just those; else the whole current view.
@@ -1960,7 +2256,7 @@ impl App {
         }
         lines.push(String::new());
         lines.push("Solo aggiunta: non sovrascrive, non modifica, non elimina.".into());
-        self.confirm = Some(Confirm { title: " CONFERMA IMPORT ".into(), lines, action: Pending::ImportBundle { src }, alts: Vec::new() });
+        self.confirm = Some(Confirm { title: " CONFERMA IMPORT ".into(), lines, action: Pending::ImportBundle { src }, alts: Vec::new(), buttons: None, cancel: None });
     }
     /// Actually import the bundle (already confirmed).
     fn do_import_bundle(&mut self, src: PathBuf) {
@@ -1973,11 +2269,25 @@ impl App {
     }
     /// Run a confirmed pending action.
     fn run_pending(&mut self, action: Pending) {
+        if let Pending::Tour(n) = action {
+            if (n as usize) < Self::TOUR_PAGES { self.tour_page(n); } else { self.finish_tour(); }
+            return;
+        }
+        if let Pending::TourDone = action {
+            self.finish_tour();
+            return;
+        }
         if self.dry { return; } // test mode: never touch disk / spawn
         match action {
+            // Gia' gestite sopra: passano prima del controllo `dry` perche' non
+            // toccano nulla, se non per ricordare che il giro e' stato visto.
+            Pending::Tour(_) | Pending::TourDone => {}
             Pending::Export { csv, json } => self.do_export(csv, json),
             Pending::Resume { id, cwd, fork, codex } => self.do_resume_now(id, cwd, fork, codex),
             Pending::SetRetention { days } => self.do_set_retention(days),
+            Pending::Wrapped => self.make_wrapped(),
+            Pending::Fleet => self.start_fleet_fetch(),
+            Pending::VaultRestore => self.restore_from_vault(),
             Pending::ExportBundle { out } => self.do_export_bundle(out),
             Pending::ImportBundle { src } => self.do_import_bundle(src),
             Pending::ArchiveProject { dir, name } => self.do_archive_now(dir, name),
@@ -2100,17 +2410,17 @@ pub fn selftest(base: PathBuf, all: Vec<Session>, cache: Arc<Mutex<HashMap<Strin
                 title: " CONFERMA EXPORT ".into(),
                 lines: vec!["riga di prova".into(), "C:/un/percorso/molto/lungo/file.csv".into()],
                 action: Pending::Export { csv: PathBuf::from("x.csv"), json: PathBuf::from("x.json") },
-                alts: Vec::new(),
+                alts: Vec::new(), buttons: None, cancel: None,
             });
             term.draw(|f| ui(f, &mut app)).expect("draw confirm");
             for r in 0..sz.1 { for c in (0..sz.0).step_by(3) { let _ = handle_mouse(&mut app, mk_click(c, r)); } }
-            app.confirm = Some(Confirm { title: " C ".into(), lines: vec![], action: Pending::Resume { id: "0".into(), cwd: "C:/Windows".into(), fork: false, codex: false }, alts: Vec::new() });
+            app.confirm = Some(Confirm { title: " C ".into(), lines: vec![], action: Pending::Resume { id: "0".into(), cwd: "C:/Windows".into(), fork: false, codex: false }, alts: Vec::new(), buttons: None, cancel: None });
             let _ = handle_key(&mut app, KeyCode::Esc, KeyModifiers::empty());
             // portable bundle export + import confirm modals (dry: no I/O)
-            app.confirm = Some(Confirm { title: " EXP ".into(), lines: vec!["bundle".into()], action: Pending::ExportBundle { out: PathBuf::from("x.phx") }, alts: Vec::new() });
+            app.confirm = Some(Confirm { title: " EXP ".into(), lines: vec!["bundle".into()], action: Pending::ExportBundle { out: PathBuf::from("x.phx") }, alts: Vec::new(), buttons: None, cancel: None });
             term.draw(|f| ui(f, &mut app)).expect("draw expbundle");
             let _ = handle_key(&mut app, KeyCode::Enter, KeyModifiers::empty());
-            app.confirm = Some(Confirm { title: " IMP ".into(), lines: vec!["import".into()], action: Pending::ImportBundle { src: PathBuf::from("x.phx") }, alts: Vec::new() });
+            app.confirm = Some(Confirm { title: " IMP ".into(), lines: vec!["import".into()], action: Pending::ImportBundle { src: PathBuf::from("x.phx") }, alts: Vec::new(), buttons: None, cancel: None });
             term.draw(|f| ui(f, &mut app)).expect("draw import");
             let _ = handle_key(&mut app, KeyCode::Esc, KeyModifiers::empty());
             // request_* paths (dry mode short-circuits before any disk access)
@@ -2329,6 +2639,9 @@ pub fn run(
     watch: u64,
 ) -> std::io::Result<()> {
     let (tx, rx) = mpsc::channel::<Vec<Session>>();
+    // A clone for the on-demand re-scan (`R`), so it lands the same way the
+    // watcher does instead of blocking the draw.
+    let scan_tx = tx.clone();
     {
         let base = base.clone();
         let cache = cache.clone();
@@ -2353,6 +2666,7 @@ pub fn run(
     );
     let mut app = App::new(base, cache, prices, budget, remaps, sync_repo, watch, theme_idx, pixel, all);
     app.fleet_tx = Some(ftx);
+    app.scan_tx = Some(scan_tx);
     // Prima cosa che si vede, se serve: la retention di Claude Code sta
     // cancellando la cronologia che l'utente e' appena venuto a guardare.
     app.maybe_ask_retention();
@@ -2369,11 +2683,19 @@ pub fn run(
             if !overlay {
                 while let Ok(v) = rx.try_recv() {
                     app.set_sessions(v);
+                    // Whoever sent it, the window is current again.
+                    if app.scanning {
+                        app.scanning = false;
+                        app.status = "scan completato".into();
+                    }
                 }
                 while let Ok((gen, alias, res)) = frx.try_recv() {
                     app.on_fleet_msg(gen, alias, res);
                 }
             }
+            // Il giro di presentazione aspetta che la modale sia libera: la
+            // domanda sulla retention viene prima, e ha ragione lei.
+            app.maybe_show_tour();
             if last_blink.elapsed() >= Duration::from_millis(550) {
                 app.blink = !app.blink;
                 last_blink = Instant::now();
@@ -2434,9 +2756,10 @@ fn dispatch(app: &mut App, code: u16) -> bool {
         A_OPENFOLDER => { if app.tab == 0 && app.selected().is_some() { app.open_session_folder(); } }
         A_COPYPATH => { if app.tab == 0 && app.selected().is_some() { app.copy_session_path(); } }
         A_ARCHIVE => { if app.tab == 0 && app.selected().is_some() { app.request_archive_project(); } }
-        A_FLEET => app.start_fleet_fetch(),
-        A_VAULT_RESTORE => app.restore_from_vault(),
-        A_WRAPPED => app.make_wrapped(),
+        A_FLEET => app.request_fleet(),
+        A_VAULT_RESTORE => app.request_vault_restore(),
+        A_WRAPPED => app.request_wrapped(),
+        A_MOUSE_MODE => app.toggle_mouse_mode(),
         A_HELP => { app.help = true; app.help_scroll = 0; }
         A_TAB => app.tab = (app.tab + 1) % 3,
         A_PIXEL => { app.pixel = !app.pixel; app.status = if app.pixel { "pixel ON".into() } else { "pixel OFF".into() }; }
@@ -2497,7 +2820,6 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
         }
         return false;
     }
-    // File picker captures input while open.
     if app.picker.is_some() {
         match code {
             KeyCode::Up | KeyCode::Char('k') => app.picker_move(-1),
@@ -2700,6 +3022,19 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
     false
 }
 
+/// True when a left click at (col,row) landed OUTSIDE the overlay on screen.
+///
+/// One rule for every panel: clicking the darkened background dismisses it,
+/// clicking inside does not. Before this, each overlay decided for itself — the
+/// reader and the help closed on *any* click, so you could not click inside
+/// them at all, while the picker and the global search could only be left with
+/// the keyboard. Neither is usable with a mouse alone.
+fn clicked_outside(app: &App, m: &event::MouseEvent) -> bool {
+    matches!(m.kind, MouseEventKind::Down(MouseButton::Left))
+        && app.rect_overlay.width > 0
+        && !within(app.rect_overlay, m.column, m.row)
+}
+
 fn handle_mouse(app: &mut App, m: event::MouseEvent) -> bool {
     let (col, row) = (m.column, m.row);
     // The delete-project modal is keyboard-only: swallow every mouse event so a
@@ -2714,7 +3049,15 @@ fn handle_mouse(app: &mut App, m: event::MouseEvent) -> bool {
             for (i, r) in app.rect_confirm_buttons.iter().enumerate() { if hit(*r, col, row) { act = Some(i); break; } }
             match act {
                 Some(0) => { if let Some(c) = app.confirm.take() { app.run_pending(c.action); } }
-                Some(1) => { app.confirm = None; app.status = "annullato".into(); }
+                Some(1) => {
+                    // Il secondo bottone di solito annulla e basta; quando
+                    // porta un'azione («salta il giro») va eseguita, o la
+                    // scelta non verrebbe ricordata.
+                    match app.confirm.take().and_then(|c| c.cancel) {
+                        Some(p) => app.run_pending(p),
+                        None => app.status = "annullato".into(),
+                    }
+                }
                 _ => {}
             }
         }
@@ -2741,6 +3084,11 @@ fn handle_mouse(app: &mut App, m: event::MouseEvent) -> bool {
     }
     // File picker captures input while open.
     if app.picker.is_some() {
+        if clicked_outside(app, &m) {
+            app.picker = None;
+            app.status = "annullato".into();
+            return false;
+        }
         match m.kind {
             MouseEventKind::ScrollDown => app.picker_move(3),
             MouseEventKind::ScrollUp => app.picker_move(-3),
@@ -2757,8 +3105,11 @@ fn handle_mouse(app: &mut App, m: event::MouseEvent) -> bool {
         }
         return false;
     }
-    // Global content search captures input while open.
     if app.gsearch.is_some() {
+        if clicked_outside(app, &m) {
+            app.gsearch = None;
+            return false;
+        }
         match m.kind {
             MouseEventKind::ScrollDown => app.gsearch_move(3),
             MouseEventKind::ScrollUp => app.gsearch_move(-3),
@@ -2783,7 +3134,10 @@ fn handle_mouse(app: &mut App, m: event::MouseEvent) -> bool {
         match m.kind {
             MouseEventKind::ScrollDown => app.reader_scroll(3),
             MouseEventKind::ScrollUp => app.reader_scroll(-3),
-            MouseEventKind::Down(MouseButton::Left) => app.reader = None,
+            // Only a click on the background closes it. Closing on ANY click
+            // made the reader impossible to click into — you could not even put
+            // the cursor in it without losing your place.
+            MouseEventKind::Down(MouseButton::Left) if clicked_outside(app, &m) => app.reader = None,
             _ => {}
         }
         return false;
@@ -2798,16 +3152,32 @@ fn handle_mouse(app: &mut App, m: event::MouseEvent) -> bool {
             else if app.tab == 0 && !app.detail && !app.show_agents { app.move_sel(-3); }
         }
         MouseEventKind::Down(MouseButton::Left) => {
-            // Help overlay: theme buttons, else close.
+            // Help overlay: a theme swatch, a command row, or the background.
             if app.help {
                 let mut pick = None;
                 for (i, r) in app.rect_theme_buttons.iter().enumerate() { if hit(*r, col, row) { pick = Some(i); break; } }
-                if let Some(i) = pick { set_theme(app, i); }
-                app.help = false;
+                if let Some(i) = pick {
+                    set_theme(app, i);
+                    return false; // stay open: themes are meant to be tried
+                }
+                // Every command listed in the help is a button. This is what
+                // makes the app usable without the keyboard at all: the help
+                // stops being a page to read and becomes the place you run
+                // things from.
+                let act = app.rect_help_actions.at(col, row);
+                if let Some(c) = act {
+                    app.help = false;
+                    return dispatch(app, c);
+                }
+                if clicked_outside(app, &m) {
+                    app.help = false;
+                }
                 return false;
             }
             if app.show_agents {
-                app.show_agents = false;
+                if clicked_outside(app, &m) {
+                    app.show_agents = false;
+                }
                 return false;
             }
             if app.detail {
@@ -2818,12 +3188,16 @@ fn handle_mouse(app: &mut App, m: event::MouseEvent) -> bool {
                     Some(1) => { app.detail = false; app.detail_opened_ms = 0; app.open_reader(); }
                     Some(2) => app.open_agents(),
                     _ => {
-                        // A background click closes the detail — except the second
-                        // press of a double-click that JUST opened it (within
-                        // 350ms), which we swallow so the detail doesn't flash
-                        // open-then-shut. Buttons above are never debounced, so
-                        // RIPRENDI/AGENTI stay responsive immediately.
-                        if now_ms().saturating_sub(app.detail_opened_ms) >= 350 {
+                        // A click on the BACKGROUND closes the detail — except
+                        // the second press of a double-click that JUST opened it
+                        // (within 350ms), which we swallow so the detail doesn't
+                        // flash open-then-shut. Buttons above are never
+                        // debounced, so RIPRENDI/AGENTI stay responsive
+                        // immediately. A click inside the card does nothing: you
+                        // are allowed to click on the text you are reading.
+                        if clicked_outside(app, &m)
+                            && now_ms().saturating_sub(app.detail_opened_ms) >= 350
+                        {
                             app.detail = false;
                         }
                         app.detail_opened_ms = 0;
@@ -2831,11 +3205,10 @@ fn handle_mouse(app: &mut App, m: event::MouseEvent) -> bool {
                 }
                 return false;
             }
-            // Shortcut bar chips.
-            if row == app.rect_shortcut.y {
-                let mut code = None;
-                for (r, c) in &app.shortcut_groups { if hit(*r, col, row) { code = Some(*c); break; } }
-                if let Some(c) = code { return dispatch(app, c); }
+            // Shortcut bar chips. The whole bar, not just its first row: it is
+            // two rows tall when the commands do not fit on one.
+            if within(app.rect_shortcut, col, row) {
+                if let Some(c) = app.shortcut_groups.at(col, row) { return dispatch(app, c); }
             }
             // Tabs.
             if hit(app.rect_tabs, col, row) {
@@ -2908,11 +3281,15 @@ fn ui(f: &mut Frame, app: &mut App) {
     let area = f.area();
     f.render_widget(Block::default().style(Style::default().bg(th.bg).fg(th.fg)), area);
 
+    // The bar asks for the height it will actually use: one row when the
+    // commands fit, two when they do not. Deciding it here is what keeps it
+    // from dropping the ones that would have fallen off the right edge.
+    let bar_h = shortcut_bar_height(app, area.width);
     let rows = Layout::vertical([
         Constraint::Length(8), // hero: banner + version + clock/scene/caption
         Constraint::Length(1),
         Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(bar_h),
         Constraint::Min(3),
         Constraint::Length(1),
     ])
@@ -3083,7 +3460,8 @@ fn render_confirm(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
     // Clickable confirm / cancel buttons (index 0 = confirm, 1 = cancel).
     let (mut spans, mut x) = (vec![Span::raw(" ")], parts[1].x + 1);
     let mut rects = Vec::new();
-    for (key, label) in [("s", "CONFERMA"), ("Esc", "ANNULLA")] {
+    let labels = app.confirm.as_ref().and_then(|c| c.buttons).unwrap_or(("CONFERMA", "ANNULLA"));
+    for (key, label) in [("s", labels.0), ("Esc", labels.1)] {
         let (bs, w) = button(th, key, label);
         spans.extend(bs);
         rects.push(Rect { x, y: parts[1].y, width: w, height: 1 });
@@ -3157,6 +3535,7 @@ fn render_picker(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         None => return,
     };
     let pop = centered(area, 74, 76);
+    app.rect_overlay = pop;
     f.render_widget(Clear, pop);
     let title = if remap { " RESUME · scegli la cartella locale del progetto " } else { " IMPORTA · scegli un file .phx " };
     let block = Block::default().borders(Borders::ALL).border_type(btype(app.pixel))
@@ -3263,75 +3642,6 @@ fn stats_line(app: &App, th: &Theme) -> Paragraph<'static> {
     Paragraph::new(Line::from(sp))
 }
 
-fn shortcut_chips(app: &App) -> Vec<Vec<(&'static str, &'static str, u16)>> {
-    if app.confirm.is_some() {
-        return vec![vec![("s", "conferma", 0), ("Esc", "annulla", 0)]];
-    }
-    if app.picker.is_some() {
-        return vec![vec![("↑↓", "scegli", 0), ("⏎", "apri/seleziona", 0), ("←", ".. su", 0), ("Esc", "annulla", 0)]];
-    }
-    if app.searching {
-        return vec![vec![("scrivi", "", 0), ("⌫", "canc", 0), ("⏎", "ok", 0), ("Esc", "annulla", 0)]];
-    }
-    if app.reader.is_some() {
-        return vec![vec![("↑↓", "scorri", 0), ("m", "→ markdown", A_MARKDOWN), ("Esc", "chiudi", 0)]];
-    }
-    if app.help {
-        return vec![vec![("↑↓", "scorri", 0), ("PgUp/PgDn", "salta", 0), ("Esc", "chiudi", 0)]];
-    }
-    if app.gsearch.is_some() {
-        return vec![vec![("scrivi", "", 0), ("⏎", "cerca/apri", 0), ("↑↓", "scegli", 0), ("Esc", "chiudi", 0)]];
-    }
-    if app.detail || app.show_agents {
-        return vec![vec![("Esc", "chiudi", 0), ("v", "leggi", A_READ), ("r", "ripr", A_RESUME), ("a", "agenti", A_AGENTS)]];
-    }
-    if app.tab == 0 {
-        vec![
-            vec![("↑", "", A_UP), ("↓", "", A_DOWN), ("+/-", "riprese", 0)],
-            vec![("/", "cerca", A_SEARCH), ("f", "filtro", A_FILTER), ("o", "ord", A_SORTCOL), ("s", "dir", A_SORTDIR)],
-            vec![("⏎", "dett", A_DETAIL), ("v", "leggi", A_READ), ("g", "cerca tutto", A_GSEARCH), ("a", "agenti", A_AGENTS), ("r", "ripr", A_RESUME), ("e", "export", A_EXPORT)],
-            vec![("A", "espandi/comprimi", A_EXPAND_ALL), ("x", "porta", A_EXPBUNDLE), ("i", "importa", A_IMPORT), ("t", "tema", A_THEME_NEXT), ("p", "px", A_PIXEL), ("?", "aiuto", A_HELP), ("q", "esci", A_QUIT)],
-        ]
-    } else {
-        vec![
-            vec![("m", "metrica", A_METRIC)],
-            vec![("Tab", "vista", A_TAB), ("t", "tema", A_THEME_NEXT), ("p", "px", A_PIXEL)],
-            vec![("?", "aiuto", A_HELP), ("q", "esci", A_QUIT)],
-        ]
-    }
-}
-
-fn render_shortcut_bar(app: &mut App, th: &Theme, area: Rect) -> Paragraph<'static> {
-    let groups = shortcut_chips(app);
-    let mut spans: Vec<Span> = Vec::new();
-    let mut rects: Vec<(Rect, u16)> = Vec::new();
-    let mut x = area.x;
-    let maxx = area.x + area.width;
-    spans.push(Span::styled(" ", Style::default()));
-    x += 1;
-    for (gi, group) in groups.iter().enumerate() {
-        if gi > 0 {
-            spans.push(Span::styled("║ ", Style::default().fg(th.dim)));
-            x += 2;
-        }
-        for (key, label, action) in group {
-            let text = if label.is_empty() { format!("{key} ") } else { format!("{key} {label} ") };
-            let w = text.chars().count() as u16;
-            if x + w >= maxx { break; }
-            spans.push(Span::styled(key.to_string(), Style::default().fg(th.accent).add_modifier(Modifier::BOLD)));
-            if !label.is_empty() {
-                spans.push(Span::styled(format!(" {label}"), Style::default().fg(th.dim)));
-            }
-            spans.push(Span::styled(" ", Style::default()));
-            if *action != 0 {
-                rects.push((Rect { x, y: area.y, width: w, height: 1 }, *action));
-            }
-            x += w;
-        }
-    }
-    app.shortcut_groups = rects;
-    Paragraph::new(Line::from(spans)).style(Style::default().bg(th.bg))
-}
 
 fn footer(app: &App, th: &Theme) -> Paragraph<'static> {
     let states = ["tutte", "live", "idle", "fine", "★ preferiti"];
@@ -3822,6 +4132,7 @@ fn button(th: &Theme, key: &str, label: &str) -> (Vec<Span<'static>>, u16) {
 fn render_detail(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
     let s = match app.selected() { Some(s) => s.clone(), None => return };
     let pop = centered(area, 80, 88);
+    app.rect_overlay = pop;
     f.render_widget(Clear, pop);
     let block = Block::default().borders(Borders::ALL).border_type(btype(app.pixel))
         .border_style(Style::default().fg(th.accent)).style(Style::default().bg(th.bg))
@@ -3929,6 +4240,7 @@ fn render_detail(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
 
 fn render_agents(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
     let pop = centered(area, 84, 82);
+    app.rect_overlay = pop;
     f.render_widget(Clear, pop);
     let block = Block::default().borders(Borders::ALL).border_type(btype(app.pixel))
         .border_style(Style::default().fg(th.accent)).style(Style::default().bg(th.bg))
@@ -3966,10 +4278,22 @@ fn render_agents(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
     f.render_widget(Paragraph::new(Line::from(spans)), parts[1]);
 }
 
+/// The command a help row runs when clicked, or 0 for a row that only explains
+/// something (the symbol legend, the CLI list).
+///
+/// Keyed on the text shown at the start of the row, so the table and the help
+/// cannot drift apart silently: rename a row's key and it simply stops being
+/// clickable, which is visible, rather than firing the wrong command.
+///
+/// A few rows list two related commands (`r · e`). Those run the FIRST one —
+/// the row's headline — which is why the important ones each have a row of
+/// their own.
+
 fn render_help(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
     // Opens large enough to read everything at a glance; still scrollable and it
     // follows the terminal size (resizable).
     let pop = centered(area, 82, 92);
+    app.rect_overlay = pop;
     f.render_widget(Clear, pop);
     let block = Block::default().borders(Borders::ALL).border_type(btype(app.pixel))
         .border_style(Style::default().fg(th.accent)).style(Style::default().bg(th.bg))
@@ -3978,150 +4302,28 @@ fn render_help(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
     f.render_widget(block, pop);
     let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(1), Constraint::Length(1)]).split(inner);
 
-    let item = |k: &str, d: &str| Line::from(vec![
-        Span::styled(format!("  {:<12}", k), Style::default().fg(th.accent)),
-        Span::styled(d.to_string(), Style::default().fg(th.fg)),
-    ]);
-    let lines = vec![
-        Line::raw(""),
-        Line::from(Span::styled("  LEGENDA SIMBOLI", Style::default().fg(th.accent).add_modifier(Modifier::BOLD))),
-        item("↳", "sessione ripresa o da /compact (continua la precedente)"),
-        item("★ · 📝 · ◉", "preferito  ·  ha una nota  ·  selezionata (multi-select)"),
-        item("◆", "sessione Codex (~/.codex/sessions) invece che Claude Code: nome del progetto in un altro colore, riprende con  codex resume . Filtro:  agent:codex . Token e costo sono quelli di OpenAI (prezzi \"gpt\" in phosphor.json)."),
-        item("⚠ cronologia", "Claude Code cancella i suoi transcript dopo  cleanupPeriodDays  giorni — 30 di default, all'avvio, senza cestino: è così che spariscono i progetti fermi da un mese. Phosphor te lo chiede al primo avvio; puoi anche farlo da riga di comando con  phosphor retention 3650  (cambia solo quel numero in ~/.claude/settings.json e tiene una copia del file). Codex non ha nulla di simile: non pota per data. Contro tutto il resto — pulitori disco, sync, cancellazioni a mano — serve  phosphor vault on ."),
-        item("⛁", "salvata dal vault: il suo agente ha cancellato il transcript, che però sopravvive come hard link in ~/.claude/phosphor-vault. È completa — token, conversazione, tutto — e  V  la rimette al suo posto, tornando riprendibile. Si accende con  phosphor vault on  (spento di default: è l'unica cosa che scrive su disco)."),
-        item("⚱", "recuperata da history.jsonl: il transcript l'ha cancellato Claude Code (cleanupPeriodDays, 30 giorni di default). Restano i prompt; niente risposte, token, costo o riprendi. Alza cleanupPeriodDays in ~/.claude/settings.json per non perderne altre."),
-        item("● ◐ ·", "stato:  ● attiva   ◐ in pausa (idle)   · conclusa"),
-        item("⏎", "tasto Invio (apre il dettaglio della sessione)"),
-        item("↑ ↓", "frecce su/giù (muovono la selezione)"),
-        Line::from(Span::styled("  In alto a destra scorrono pillole d'uso (› …).", Style::default().fg(th.dim))),
-        Line::raw(""),
-        Line::from(Span::styled("  COMANDI RAPIDI", Style::default().fg(th.accent).add_modifier(Modifier::BOLD))),
-        item("↑↓ / scroll", "muovi selezione (senza aprire)"),
-        item("Invio / click", "apri dettaglio della sessione"),
-        item("destro / .", "menù sessione: tutte le azioni in un colpo solo"),
-        item("+ / -", "espandi/comprimi le riprese della conversazione selezionata"),
-        item("A", "espandi/comprimi TUTTE le riprese in una volta"),
-        item("⟳N ✓ / (certo)", "link PROVATO (le sessioni condividono messaggi)"),
-        item("(probabile)", "raggruppamento STIMATO da titolo+progetto+tempo"),
-        item("v", "leggi la conversazione (transcript) in-app"),
-        item("g", "cerca nel CONTENUTO di tutte le conversazioni → apri al punto"),
-        item("M", "esporta la conversazione in Markdown (sul Desktop)"),
-        item("*  ·  n", "preferito (★)  ·  nota sulla sessione (📝)"),
-        item("N", "rinomina: titolo/alias tuo mostrato in lista al posto di quello automatico"),
-        item("O  ·  y", "apri la cartella del progetto  ·  copia il percorso del transcript"),
-        item("spazio", "seleziona/deseleziona (◉) per azioni in blocco  ·  Esc azzera"),
-        item("in blocco", "con selezione attiva:  x bundle  ·  * preferiti  ·  X cancella (conferma)"),
-        item("a", "esplora sub-agenti / workflow"),
-        item("/", "filtra la lista — testo + filtri: project: model: file: tool: agent: host: after: before:"),
-        item("f  ·  o/s", "filtro stato/★preferiti  ·  ordina colonna/direzione"),
-        item("m", "metrica grafici (o click sui bottoni)"),
-        item("r  ·  e", "riprendi (claude --resume)  ·  export CSV/JSON"),
-        item("x  ·  i", "esporta bundle .phx  ·  importa (selettore file + conferma)"),
-        item("H", "ARCHIVIA il progetto (lo nasconde in archived/, reversibile) — ripristina da CLI"),
-        item("W", "WRAPPED: genera sul Desktop la card riassuntiva dell'anno (PNG + SVG) — token, costo, energia, acqua. Anonima: solo numeri."),
-        item("V", "RIPRISTINA dal vault: rimette il transcript nel magazzino del suo agente (solo righe ⛁)"),
-        item("F", "FLOTTA: interroga i tuoi altri PC via ssh e unisce le loro sessioni [alias]"),
-        item("", "  (configura con:  phosphor remote add <alias-ssh> · su remoto: r riprende LÀ)"),
-        item("D", "CANCELLA il progetto della sessione (doppia conferma: riscrivi il nome; offre backup .phx)"),
-        item("t/T  ·  p", "tema avanti/indietro  ·  grafica pixel"),
-        item("R  ·  Tab", "rescan  ·  cambia vista (o 1 2 3)  ·  q esci"),
-        Line::raw(""),
-        Line::from(Span::styled("  Da terminale  ›  phosphor …", Style::default().fg(th.accent))),
-        item("find <testo>", "ricerca full-text in tutte le sessioni"),
-        item("cost", "spesa 24h/7g/30g · budget · top progetti"),
-        item("limits", "piano (es. Max 20x) · reset finestra limiti"),
-        item("watch", "monitor live con avvisi di stato"),
-        item("clean", "spazio disco · pulizia vuote (con conferma)"),
-        item("export-all", "crea il bundle .phx (import <file> sull'altro PC)"),
-        item("mcp", "server MCP: dà a Claude la memoria delle sessioni passate"),
-        item("~uso 5h/7g", "stima LOCALE del volume token (non la % ufficiale dei limiti)"),
-        Line::raw(""),
-        Line::from(Span::styled("  GUIDA · Portare una sessione su un altro PC", Style::default().fg(th.accent).add_modifier(Modifier::BOLD))),
-        Line::from(Span::styled("  Funziona con lo STESSO account Claude o con uno DIVERSO:", Style::default().fg(th.dim))),
-        Line::from(Span::styled("  il .phx non contiene credenziali; l'import è tutto locale.", Style::default().fg(th.dim))),
-        Line::raw(""),
-        Line::from(Span::styled("  Cosa viene spostato", Style::default().fg(th.accent))),
-        Line::from(Span::styled("   · il transcript + le sue sottocartelle (sub-agenti e", Style::default().fg(th.fg))),
-        Line::from(Span::styled("     workflow), tutto in un unico file .phx", Style::default().fg(th.fg))),
-        Line::from(Span::styled("   · NON il codice del progetto, NON il login/credenziali", Style::default().fg(th.dim))),
-        Line::raw(""),
-        Line::from(Span::styled("  1) Esporta (sul PC di partenza)", Style::default().fg(th.accent))),
-        Line::from(Span::styled("     · nell'app: premi  x  (impacchetta le sessioni in vista)", Style::default().fg(th.fg))),
-        Line::from(Span::styled("     · da terminale:", Style::default().fg(th.fg))),
-        Line::from(Span::styled("         phosphor export-all                 (tutte)", Style::default().fg(th.fg))),
-        Line::from(Span::styled("         phosphor export-all --project NOME  (un progetto)", Style::default().fg(th.fg))),
-        Line::from(Span::styled("         phosphor export-all --out D:\\f.phx  (percorso scelto)", Style::default().fg(th.fg))),
-        Line::from(Span::styled("     · esce in  Desktop\\phosphor-sessioni-*.phx", Style::default().fg(th.dim))),
-        Line::raw(""),
-        Line::from(Span::styled("  2) Trasferisci", Style::default().fg(th.accent))),
-        Line::from(Span::styled("     · copia il .phx sull'altro PC (USB, cloud, email…)", Style::default().fg(th.fg))),
-        Line::raw(""),
-        Line::from(Span::styled("  3) Importa (sul PC di destinazione)", Style::default().fg(th.accent))),
-        Line::from(Span::styled("     · nell'app: premi  i  → si apre un selettore di file:", Style::default().fg(th.fg))),
-        Line::from(Span::styled("       sfoglia le cartelle, scegli il .phx, poi conferma", Style::default().fg(th.fg))),
-        Line::from(Span::styled("     · da terminale:  phosphor import <file.phx>", Style::default().fg(th.fg))),
-        Line::from(Span::styled("     · SICURO: non sovrascrive, salta i file già presenti,", Style::default().fg(th.dim))),
-        Line::from(Span::styled("       chiede sempre conferma; aggiunge solo ciò che manca", Style::default().fg(th.dim))),
-        Line::raw(""),
-        Line::from(Span::styled("  4) Riprendi la conversazione (non solo vederla)", Style::default().fg(th.accent))),
-        Line::from(Span::styled("     · servono Claude installato e un login valido su quel", Style::default().fg(th.fg))),
-        Line::from(Span::styled("       PC (anche un account DIVERSO va bene)", Style::default().fg(th.fg))),
-        Line::from(Span::styled("     · serve la cartella di lavoro del progetto:", Style::default().fg(th.fg))),
-        Line::from(Span::styled("         stesso percorso  →  seleziona e premi  r", Style::default().fg(th.fg))),
-        Line::from(Span::styled("                            (oppure  claude --resume <id>)", Style::default().fg(th.fg))),
-        Line::from(Span::styled("         percorso diverso →  porta il codice (es. con git),", Style::default().fg(th.fg))),
-        Line::from(Span::styled("                            poi premi  r : se la cartella non", Style::default().fg(th.fg))),
-        Line::from(Span::styled("                            esiste, Phosphor apre un selettore →", Style::default().fg(th.fg))),
-        Line::from(Span::styled("                            scegli quella locale e riprende", Style::default().fg(th.fg))),
-        Line::from(Span::styled("                            (forka da solo; salva il remap)", Style::default().fg(th.dim))),
-        Line::from(Span::styled("     · il CODICE non è nel .phx: portalo a parte (git/copia)", Style::default().fg(th.dim))),
-        Line::raw(""),
-        Line::from(Span::styled("  GUIDA · La flotta: i tuoi altri PC via SSH (tasto F)", Style::default().fg(th.accent).add_modifier(Modifier::BOLD))),
-        Line::from(Span::styled("  Il .phx serve quando l'altro PC è SPENTO. Se è acceso,", Style::default().fg(th.fg))),
-        Line::from(Span::styled("  vai tu dalla sessione invece di spostarla: niente copie,", Style::default().fg(th.fg))),
-        Line::from(Span::styled("  niente remap, claude riprende LÀ nella cartella giusta.", Style::default().fg(th.fg))),
-        Line::raw(""),
-        Line::from(Span::styled("  Configura (una volta sola)", Style::default().fg(th.accent))),
-        Line::from(Span::styled("     phosphor remote add <alias>     es. pc-casa o utente@host", Style::default().fg(th.fg))),
-        Line::from(Span::styled("  (l'alias viene da ~/.ssh/config; Phosphor NON salva host,", Style::default().fg(th.dim))),
-        Line::from(Span::styled("   utenti o chiavi — solo l'alias. Canale cifrato da SSH.)", Style::default().fg(th.dim))),
-        Line::from(Span::styled("  Sull'altro PC servono: sshd attivo, phosphor nel PATH,", Style::default().fg(th.dim))),
-        Line::from(Span::styled("  claude loggato (paga l'account di QUELLA macchina).", Style::default().fg(th.dim))),
-        Line::raw(""),
-        Line::from(Span::styled("  Usa", Style::default().fg(th.accent))),
-        Line::from(Span::styled("     F          interroga gli host e unisce le sessioni [alias]", Style::default().fg(th.fg))),
-        Line::from(Span::styled("     host:nome  filtra per PC ( host:qui  = solo locali)", Style::default().fg(th.fg))),
-        Line::from(Span::styled("     agent:codex / agent:claude  filtra per agente", Style::default().fg(th.fg))),
-        Line::from(Span::styled("     r          su una riga [alias]: apre  ssh -t <alias>", Style::default().fg(th.fg))),
-        Line::from(Span::styled("                phosphor resume-here <id>  → riprende LÀ", Style::default().fg(th.fg))),
-        Line::from(Span::styled("  Sulle righe remote restano attivi r/dettaglio/note/preferiti;", Style::default().fg(th.dim))),
-        Line::from(Span::styled("  le azioni sui file (lettura, export, cancella…) sono locali.", Style::default().fg(th.dim))),
-        Line::from(Span::styled("  Da terminale:  phosphor fleet  (riassunto per host).", Style::default().fg(th.dim))),
-        Line::raw(""),
-        Line::from(Span::styled("  GUIDA · Dare a Claude la memoria delle sessioni (MCP)", Style::default().fg(th.accent).add_modifier(Modifier::BOLD))),
-        Line::from(Span::styled("  Cos'è: con  phosphor mcp  Claude Code può cercare e", Style::default().fg(th.fg))),
-        Line::from(Span::styled("  rileggere le tue conversazioni PASSATE durante una nuova", Style::default().fg(th.fg))),
-        Line::from(Span::styled("  chat (\"cosa avevo deciso su X?\"). 100% locale e in sola", Style::default().fg(th.fg))),
-        Line::from(Span::styled("  lettura: nessuna rete, parla con Claude via stdin/stdout.", Style::default().fg(th.dim))),
-        Line::raw(""),
-        Line::from(Span::styled("  Come si attiva (una volta sola)", Style::default().fg(th.accent))),
-        Line::from(Span::styled("     claude mcp add phosphor -- phosphor mcp", Style::default().fg(th.fg))),
-        Line::from(Span::styled("  (phosphor dev'essere nel PATH; poi riapri Claude Code)", Style::default().fg(th.dim))),
-        Line::raw(""),
-        Line::from(Span::styled("  Cosa può fare Claude tramite Phosphor", Style::default().fg(th.accent))),
-        Line::from(Span::styled("   · search_sessions — trova sessioni (stessi filtri di  / :", Style::default().fg(th.fg))),
-        Line::from(Span::styled("                       project: model: file: tool: after:…)", Style::default().fg(th.dim))),
-        Line::from(Span::styled("   · read_session    — legge il transcript di una sessione", Style::default().fg(th.fg))),
-        Line::from(Span::styled("   · search_content  — cerca nel TESTO di tutte le chat", Style::default().fg(th.fg))),
-        Line::from(Span::styled("  Tu chiedi a Claude in linguaggio naturale; sceglie lui", Style::default().fg(th.dim))),
-        Line::from(Span::styled("  quale strumento usare. Tutto resta sul tuo PC.", Style::default().fg(th.dim))),
-        Line::raw(""),
-        Line::from(Span::styled("  Tutto è cliccabile: tab, header, bottoni, chip, temi.", Style::default().fg(th.dim))),
-    ];
+    let lines = help::lines(th);
     // Scrollable: clamp the offset so you can't scroll past the end.
     let max_scroll = (lines.len() as u16).saturating_sub(parts[0].height);
     if app.help_scroll > max_scroll { app.help_scroll = max_scroll; }
+    // Work out which visible rows are commands, so a click can run them. The
+    // key shown at the start of a row IS the row's identity, so it is also what
+    // the lookup keys on — no parallel list to keep in step with the text.
+    app.rect_help_actions.clear();
+    for (i, l) in lines.iter().enumerate() {
+        let key = l.spans.first().map(|s| s.content.trim()).unwrap_or("");
+        let code = help::action(key);
+        if code == 0 {
+            continue;
+        }
+        let y = i as i32 - app.help_scroll as i32;
+        if y >= 0 && (y as u16) < parts[0].height {
+            app.rect_help_actions.push(
+                Rect { x: parts[0].x, y: parts[0].y + y as u16, width: parts[0].width, height: 1 },
+                code,
+            );
+        }
+    }
     f.render_widget(Paragraph::new(lines).scroll((app.help_scroll, 0)), parts[0]);
 
     // Clickable theme swatches.
@@ -4186,6 +4388,7 @@ fn wrap_text(s: &str, width: usize) -> Vec<String> {
 
 fn render_reader(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
     let pop = centered(area, 86, 92);
+    app.rect_overlay = pop;
     f.render_widget(Clear, pop);
     let width = pop.width.saturating_sub(4) as usize; // 2 borders + 2 indent
     let (title, lines, turn_starts): (String, Vec<Line>, Vec<usize>) = {
@@ -4233,6 +4436,7 @@ fn render_reader(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
 
 fn render_gsearch(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
     let pop = centered(area, 86, 84);
+    app.rect_overlay = pop;
     f.render_widget(Clear, pop);
     let block = Block::default().borders(Borders::ALL).border_type(btype(app.pixel))
         .border_style(Style::default().fg(th.accent)).style(Style::default().bg(th.bg))
@@ -4307,6 +4511,248 @@ mod tree_tests {
 
     // id of the session at visible row `vp`
     fn id_at(app: &App, vp: usize) -> &str { &app.all[app.view[vp]].id }
+
+    /// Disegna davvero l'interfaccia, come fa il programma. Serve perche' i
+    /// rettangoli cliccabili NASCONO dal disegno: senza questo passaggio il
+    /// mouse non ha nulla su cui cadere, e un test che clicca senza disegnare
+    /// proverebbe soltanto se stesso.
+    fn draw(app: &mut App) {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut term = Terminal::new(TestBackend::new(120, 40)).expect("backend");
+        term.draw(|f| ui(f, app)).expect("disegno");
+    }
+
+    /// Clicca al centro del rettangolo: il bordo e' proprio il punto in cui un
+    /// errore di un pixel non si nota.
+    fn click_middle(app: &mut App, r: Rect) {
+        let _ = handle_mouse(app, mk_click(r.x + r.width / 2, r.y + r.height / 2));
+    }
+
+    fn chip_rect(app: &App, action: u16) -> Rect {
+        app.shortcut_groups
+            .rect_of(action)
+            .unwrap_or_else(|| panic!("nessun chip per l azione {action} nella barra"))
+    }
+
+    #[test]
+    fn every_chip_drawn_in_the_bar_can_be_clicked() {
+        // Il difetto che questo chiude: i rettangoli cliccabili vivono due
+        // volte — il disegno li produce, il mouse li rilegge da un campo di
+        // App. Se chi aggiunge un bottone si dimentica di registrarlo, il
+        // bottone SI VEDE e non risponde, e finora nessun test se ne accorgeva.
+        let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
+        for mouse_only in [false, true] {
+            app.mouse_only = mouse_only;
+            for tab in [0usize, 1] {
+                app.tab = tab;
+                draw(&mut app);
+                let drawn: Vec<u16> = shortcut_chips(&app)
+                    .iter()
+                    .flatten()
+                    .map(|(_, _, a)| *a)
+                    .filter(|a| *a != 0)
+                    .collect();
+                assert!(!drawn.is_empty());
+                for a in drawn {
+                    let r = chip_rect(&app, a);
+                    assert!(r.width > 0 && r.height > 0, "azione {a}: rettangolo vuoto");
+                    // e il rettangolo sta DENTRO la barra che l'ha disegnato
+                    let bar = app.rect_shortcut;
+                    assert!(
+                        r.y >= bar.y && r.y < bar.y + bar.height,
+                        "azione {a}: fuori dalla barra"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_tour_shows_once_clicks_through_and_never_comes_back() {
+        let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
+        app.dry = false;
+        app.base = std::env::temp_dir().join(format!("phosphor-tour-{}", std::process::id()));
+        std::fs::create_dir_all(&app.base).unwrap();
+        app.tour_todo = true;
+
+        // Aspetta il suo turno: la domanda sulla retention viene prima.
+        app.confirm = Some(Confirm {
+            title: " ALTRO ".into(),
+            lines: vec![],
+            action: Pending::SetRetention { days: 0 },
+            alts: Vec::new(),
+            buttons: None,
+            cancel: None,
+        });
+        app.maybe_show_tour();
+        assert_eq!(app.confirm.as_ref().unwrap().title, " ALTRO ", "non scavalca la retention");
+        app.confirm = None;
+
+        // Poi arriva, e si sfoglia col mouse: i bottoni dicono cosa fanno.
+        app.maybe_show_tour();
+        for page in 0..App::TOUR_PAGES {
+            let c = app.confirm.as_ref().expect("pagina {page} del giro");
+            assert!(c.title.contains(&format!("{} di 3", page + 1)), "titolo: {}", c.title);
+            let (ok, _) = c.buttons.expect("etichette proprie, non CONFERMA/ANNULLA");
+            assert!(ok == "AVANTI" || ok == "INIZIA", "bottone: {ok}");
+            draw(&mut app);
+            let r = app.rect_confirm_buttons[0];
+            click_middle(&mut app, r);
+        }
+        // Finito: la modale si chiude e non si ripresenta.
+        assert!(app.confirm.is_none(), "l'ultima pagina chiude");
+        assert!(!app.tour_todo);
+        app.maybe_show_tour();
+        assert!(app.confirm.is_none(), "non torna");
+        assert!(crate::config::load(&app.base).tour_done, "e se lo ricorda su disco");
+        std::fs::remove_dir_all(&app.base).ok();
+    }
+
+    #[test]
+    fn skipping_the_tour_also_counts_as_having_seen_it() {
+        // Il secondo bottone qui non è «annulla»: è «salta». Se annullasse e
+        // basta, il giro tornerebbe al prossimo avvio — cioè la risposta
+        // dell'utente verrebbe ignorata.
+        let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
+        app.dry = false;
+        app.base = std::env::temp_dir().join(format!("phosphor-tour-skip-{}", std::process::id()));
+        std::fs::create_dir_all(&app.base).unwrap();
+        app.tour_todo = true;
+        app.maybe_show_tour();
+        draw(&mut app);
+        let r = app.rect_confirm_buttons[1];
+        click_middle(&mut app, r);
+        assert!(app.confirm.is_none());
+        assert!(!app.tour_todo, "saltato vuol dire visto");
+        assert!(crate::config::load(&app.base).tour_done);
+        std::fs::remove_dir_all(&app.base).ok();
+    }
+
+    #[test]
+    fn a_manual_rescan_leaves_the_window_alive() {
+        // `R` rileggeva sul thread del disegno: su uno store grande la finestra
+        // smetteva di rispondere — anche al click fuori da un pannello — senza
+        // dire che stava lavorando. Era l'unico punto in cui Phosphor sembrava
+        // morto mentre stava benissimo.
+        let dir = std::env::temp_dir().join(format!("phosphor-rescan-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
+        app.base = dir.clone();
+        app.dry = false;
+        let (tx, rx) = mpsc::channel::<Vec<Session>>();
+        app.scan_tx = Some(tx);
+
+        app.rescan_now();
+        assert!(app.scanning, "la rilettura e' partita");
+        assert!(app.status.contains("rilettura"), "e lo dice: {}", app.status);
+
+        // Tenere premuto R non accoda una fila di thread.
+        app.rescan_now();
+        assert!(app.status.contains("gia'"), "stato: {}", app.status);
+
+        // Il risultato arriva sul canale, come quello del watcher periodico.
+        let got = rx
+            .recv_timeout(Duration::from_secs(20))
+            .expect("il thread di scansione risponde");
+        app.set_sessions(got);
+        app.scanning = false;
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_bar_wraps_instead_of_swallowing_the_commands_on_the_right() {
+        // A 120 colonne — un terminale del tutto normale — la barra si fermava
+        // al bordo destro e buttava via TUTTO l'ultimo gruppo: aiuto, tema,
+        // pixel e l'interruttore del mouse. Un difetto che non si nota perche'
+        // la prova e' un'assenza: non c'e' niente di rotto da guardare.
+        let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
+        for width in [200u16, 160, 120, 100, 80] {
+            let (rows, placed) = place_chips(&app, width);
+            let wanted = shortcut_chips(&app).iter().flatten().count();
+            assert_eq!(placed.len(), wanted, "a {width} colonne manca qualche voce");
+            assert!(rows <= BAR_MAX_LINES, "a {width} colonne la barra e' alta {rows}");
+            // Nessun chip sborda, su nessuna delle righe.
+            for p in &placed {
+                assert!(p.x + p.w < width, "a {width} colonne un chip sborda");
+            }
+        }
+        // Stretto sul serio: non si pretende che ci stia tutto, si pretende
+        // che non esploda e che quello che resta sia raggiungibile.
+        let (rows, placed) = place_chips(&app, 40);
+        assert!(rows <= BAR_MAX_LINES);
+        for p in &placed {
+            assert!(p.x + p.w < 40);
+        }
+    }
+
+    #[test]
+    fn clicking_the_words_in_the_bar_does_the_thing() {
+        let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
+        app.tab = 0;
+        draw(&mut app);
+
+        // «/ cerca» apre la ricerca: si clicca la scritta, non si preme «/».
+        let r = chip_rect(&app, A_SEARCH);
+        click_middle(&mut app, r);
+        assert!(app.searching, "il chip della ricerca deve aprirla");
+        app.searching = false;
+
+        // «o ord» cambia colonna di ordinamento.
+        draw(&mut app);
+        let before = app.sort_col;
+        let r = chip_rect(&app, A_SORTCOL);
+        click_middle(&mut app, r);
+        assert_ne!(app.sort_col, before, "il chip dell'ordine deve cambiarlo");
+
+        // L'interruttore mouse: cambia modalita' e resta cliccabile DOPO,
+        // quando la barra si e' ridisegnata senza le lettere.
+        draw(&mut app);
+        assert!(!app.mouse_only);
+        let r = chip_rect(&app, A_MOUSE_MODE);
+        click_middle(&mut app, r);
+        assert!(app.mouse_only, "primo click: solo mouse");
+        draw(&mut app);
+        let r = chip_rect(&app, A_MOUSE_MODE);
+        click_middle(&mut app, r);
+        assert!(!app.mouse_only, "secondo click: si torna indietro");
+    }
+
+    #[test]
+    fn clicking_a_help_row_runs_it_and_gets_out_of_the_way() {
+        let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
+        app.ts.select(Some(0));
+        app.help = true;
+        app.help_scroll = 0;
+        draw(&mut app);
+        assert!(!app.rect_help_actions.is_empty(), "le righe dell'aiuto sono comandi");
+
+        let r = app
+            .rect_help_actions
+            .rect_of(A_GSEARCH)
+            .expect("la riga «cerca in tutti i transcript» deve essere cliccabile");
+        click_middle(&mut app, r);
+        assert!(!app.help, "l'aiuto si toglie di mezzo prima di eseguire");
+        assert!(app.gsearch.is_some(), "e l'azione parte davvero");
+    }
+
+    #[test]
+    fn clicking_a_column_header_sorts_by_that_column() {
+        let mut app = app_with(vec![
+            sess("aaa", "p", "C:/p", "titolo", 1000),
+            sess("bbb", "p", "C:/p", "altro", 2000),
+        ]);
+        app.tab = 0;
+        draw(&mut app);
+        let (r, col) = *app.rect_sort_headers.first().expect("intestazioni cliccabili");
+        click_middle(&mut app, r);
+        assert_eq!(app.sort_col, col, "si ordina per la colonna cliccata");
+        // Ri-cliccare la stessa intestazione inverte il verso, come ovunque.
+        draw(&mut app);
+        let desc = app.sort_desc;
+        click_middle(&mut app, r);
+        assert_ne!(app.sort_desc, desc, "secondo click: verso invertito");
+    }
 
     #[test]
     fn fleet_merge_dedups_and_stays_after_rescan() {
@@ -4405,6 +4851,88 @@ mod tree_tests {
         c2.maybe_ask_retention();
         assert!(c2.confirm.is_none(), "chiesto una volta, mai piu'");
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn clicking_outside_closes_a_panel_and_clicking_inside_does_not() {
+        // Il difetto vero che questo previene: prima lettore e aiuto si
+        // chiudevano a QUALUNQUE click, quindi non ci si poteva cliccare
+        // dentro; picker e ricerca globale invece non si chiudevano affatto col
+        // mouse. Due comportamenti opposti, entrambi inutilizzabili senza
+        // tastiera.
+        let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
+        app.rect_overlay = Rect { x: 10, y: 5, width: 40, height: 20 };
+        let click = |c: u16, r: u16| event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: c,
+            row: r,
+            modifiers: KeyModifiers::empty(),
+        };
+        assert!(!clicked_outside(&app, &click(20, 10)), "dentro il pannello");
+        assert!(clicked_outside(&app, &click(2, 2)), "fuori dal pannello");
+        assert!(clicked_outside(&app, &click(60, 10)), "a destra del pannello");
+        // lo scroll non chiude mai: leggere non è un modo per andarsene
+        let scroll = event::MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 2,
+            row: 2,
+            modifiers: KeyModifiers::empty(),
+        };
+        assert!(!clicked_outside(&app, &scroll));
+        // senza overlay disegnato non esiste un "fuori"
+        app.rect_overlay = Rect { x: 0, y: 0, width: 0, height: 0 };
+        assert!(!clicked_outside(&app, &click(2, 2)));
+    }
+
+    #[test]
+    fn every_help_row_that_looks_like_a_command_is_one() {
+        // La tabella e l'aiuto sono due posti diversi: questo test e' cio' che
+        // impedisce che si separino in silenzio.
+        assert_eq!(help::action("v"), A_READ);
+        assert_eq!(help::action("W"), A_WRAPPED);
+        assert_eq!(help::action("V"), A_VAULT_RESTORE);
+        assert_eq!(help::action("F"), A_FLEET);
+        assert_eq!(help::action("D"), A_DELPROJECT);
+        // le righe composte eseguono la PRIMA, che e' il titolo della riga
+        assert_eq!(help::action("r  ·  e"), A_RESUME);
+        assert_eq!(help::action("x  ·  i"), A_EXPBUNDLE);
+        // la legenda non e' cliccabile: sono simboli, non comandi
+        for k in ["↳", "◆", "⛁", "⚱", "● ◐ ·", "(probabile)", "in blocco"] {
+            assert_eq!(help::action(k), 0, "«{k}» non deve essere un comando");
+        }
+    }
+
+    #[test]
+    fn the_actions_that_reach_outside_now_ask_first() {
+        // Flotta (ssh verso altri PC), ripristino dal vault (scrive nel
+        // magazzino dell'agente) e Wrapped (due file sul Desktop) partivano
+        // senza chiedere nulla.
+        let mut vaulted = sess("ccc", "p", "C:/p", "sessione salvata", 2000);
+        vaulted.path = "C:/base/phosphor-vault/claude/enc/ccc.jsonl".into();
+        assert!(vaulted.is_vaulted());
+        let mut app = app_with(vec![vaulted]);
+        app.dry = false; // le richieste di conferma non fanno I/O
+        app.ts.select(Some(0));
+
+        app.request_vault_restore();
+        assert!(
+            matches!(app.confirm.as_ref().map(|c| &c.action), Some(Pending::VaultRestore)),
+            "il ripristino deve chiedere"
+        );
+        app.confirm = None;
+
+        app.request_wrapped();
+        assert!(
+            matches!(app.confirm.as_ref().map(|c| &c.action), Some(Pending::Wrapped)),
+            "la card deve chiedere: scrive sul Desktop"
+        );
+        app.confirm = None;
+
+        // Senza PC registrati la flotta non ha nulla da chiedere: dice solo
+        // come registrarne uno, invece di aprire una conferma vuota.
+        app.request_fleet();
+        assert!(app.confirm.is_none());
+        assert!(app.status.contains("remote add"), "stato: {}", app.status);
     }
 
     #[test]

@@ -244,8 +244,9 @@ fn print_cost(base: &std::path::Path, sessions: &[Session], cfg: &config::Config
     // Claude and the Codex halves are priced off different lists.
     let cx = sessions.iter().filter(|s| s.is_codex()).count();
     println!(
-        "Spesa stimata ({}):",
-        if cx > 0 { "Claude Code + Codex" } else { "Claude Code" }
+        "Spesa stimata ({}, listino del {}):",
+        if cx > 0 { "Claude Code + Codex" } else { "Claude Code" },
+        if cfg.prices_as_of.trim().is_empty() { "?" } else { cfg.prices_as_of.trim() }
     );
     println!("  ultime 5h  : {}   (finestra limiti breve — stima locale)", usd(win(5 * 3_600_000)));
     println!("  ultime 24h : {}", usd(win(d)));
@@ -259,6 +260,11 @@ fn print_cost(base: &std::path::Path, sessions: &[Session], cfg: &config::Config
         println!("  ultimi 30g : {}   (imposta \"budget\" in ~/.claude/phosphor.json per gli alert)", usd(m));
     }
     println!("  totale     : {}", usd(sessions.iter().map(|s| config::cost(s, prices)).sum::<f64>()));
+    // Un costo calcolato su prezzi vecchi e' indistinguibile da uno giusto: e'
+    // l'unico modo in cui questi numeri possono mentire senza che si veda.
+    if let Some(w) = config::prices_warning(&cfg.prices_as_of, &config::today_iso()) {
+        println!("  ⚠ {w}");
+    }
 
     // Rough energy/water footprint (stima, ±ordine di grandezza).
     let foot = |w: u64| -> (f64, f64) {
@@ -1430,6 +1436,8 @@ fn main() {
     let mut wrapped_mode = false;
     let mut wrapped_window: Option<String> = None;
     let mut wrapped_with_projects = false;
+    // `cost --explain`: scrive per esteso la catena token → prezzo → Wh → litri.
+    let mut explain = false;
     let mut wrapped_no_cost = false;
     let mut base = claude_base();
 
@@ -1445,6 +1453,7 @@ fn main() {
             "clean" => clean_mode = true,
             "wrapped" => wrapped_mode = true,
             "--with-projects" => wrapped_with_projects = true,
+            "--explain" | "--spiega" => explain = true,
             "--no-cost" => wrapped_no_cost = true,
             "--window" => {
                 if let Some(v) = args.get(i + 1) {
@@ -1713,6 +1722,12 @@ fn main() {
 
     if cost_mode {
         print_cost(&base, &sessions, &cfg);
+        if explain {
+            println!();
+            for l in config::explain(&sessions, &cfg) {
+                println!("{l}");
+            }
+        }
         return;
     }
     if wrapped_mode {

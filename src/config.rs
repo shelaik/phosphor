@@ -92,10 +92,65 @@ pub struct Config {
     /// La domanda sulla retention di Claude Code e' gia' stata posta una volta.
     /// Serve solo a non ripeterla: la risposta vera vive in settings.json.
     pub retention_asked: bool,
+    /// Modalita' SOLO MOUSE: l'interfaccia smette di insegnare i tasti e si
+    /// presenta come cose da cliccare. I tasti continuano a funzionare — non
+    /// c'e' ragione di toglierli a chi li conosce — ma non sono piu' la strada
+    /// che l'interfaccia indica.
+    pub mouse_only: bool,
+    /// The day the prices above were last checked against the vendors' pages
+    /// (ISO `YYYY-MM-DD`). Editable as `pricesAsOf`; empty means "unknown",
+    /// which is what a hand-edited file with no date deserves to be called.
+    pub prices_as_of: String,
+    /// Il giro di presentazione al primo avvio e' gia' stato visto o saltato.
+    /// Serve solo a non ripresentarlo: chi lo rivuole cancella la chiave.
+    pub tour_done: bool,
 }
 impl Default for Config {
     fn default() -> Self {
-        Config { prices: Prices::default(), theme: "fosfori".into(), watch: 5, pixel: false, budget: 0.0, path_remaps: Vec::new(), sync_repo: String::new(), sync_encrypt: String::new(), sync_identity: String::new(), favorites: Vec::new(), notes: Vec::new(), aliases: Vec::new(), remotes: Vec::new(), energy_wh_per_output_token: 0.0005, water_l_per_kwh: 1.0, vault: false, retention_asked: false }
+        Config { prices: Prices::default(), theme: "fosfori".into(), watch: 5, pixel: false, budget: 0.0, path_remaps: Vec::new(), sync_repo: String::new(), sync_encrypt: String::new(), sync_identity: String::new(), favorites: Vec::new(), notes: Vec::new(), aliases: Vec::new(), remotes: Vec::new(), energy_wh_per_output_token: 0.0005, water_l_per_kwh: 1.0, vault: false, retention_asked: false, mouse_only: false, prices_as_of: PRICES_CHECKED.into(), tour_done: false }
+    }
+}
+
+/// The day the built-in price list was last verified against the published
+/// pages. Bump it together with any price in [`Prices::default`].
+pub const PRICES_CHECKED: &str = "2026-09-15";
+
+/// A price list is called stale after this long. Six months is roughly the
+/// cadence at which these vendors have actually moved their list prices.
+pub const PRICES_STALE_DAYS: i64 = 180;
+
+/// How old the price list is in days, or `None` if the date is missing or
+/// unreadable.
+///
+/// Both dates are ISO `YYYY-MM-DD`. The point of this number is that a cost
+/// computed on last year's prices looks exactly like a correct one — and the
+/// person opening Phosphor to find out what they spent is precisely the person
+/// who does not know the list has moved.
+pub fn prices_age_days(as_of: &str, today: &str) -> Option<i64> {
+    let d = |s: &str| chrono::NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok();
+    Some((d(today)? - d(as_of)?).num_days())
+}
+
+/// Today, in the same ISO form the price date is written in.
+pub fn today_iso() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
+
+/// One line to show next to a cost when the prices behind it are old, or
+/// `None` while they are fresh. Silence is the normal case on purpose: a
+/// warning that is always there stops being read.
+pub fn prices_warning(as_of: &str, today: &str) -> Option<String> {
+    if as_of.trim().is_empty() {
+        return Some("Prezzi senza data: aggiungi «pricesAsOf» a phosphor.json.".into());
+    }
+    match prices_age_days(as_of, today) {
+        Some(d) if d >= PRICES_STALE_DAYS => Some(format!(
+            "Prezzi fermi al {} ({} mesi fa): il costo puo' essere sbagliato. Controlla i listini e aggiorna «prices» e «pricesAsOf» in phosphor.json.",
+            as_of.trim(),
+            d / 30
+        )),
+        Some(_) => None,
+        None => Some(format!("Data dei prezzi illeggibile («{}»): attesa YYYY-MM-DD.", as_of.trim())),
     }
 }
 
@@ -175,6 +230,160 @@ pub fn footprint(s: &Session, energy_wh_per_output_token: f64, water_l_per_kwh: 
         }
     }
     (wh, wh / 1000.0 * water_l_per_kwh * 1000.0)
+}
+
+/// The whole chain behind the cost and footprint figures, written out.
+///
+/// The numbers themselves were already documented, but nobody opening Phosphor
+/// could redo the arithmetic: they had to take the total on trust. This prints
+/// every step with the actual token counts, so the estimate can be argued with
+/// — which is the only thing that makes an estimate worth showing.
+///
+/// It lives here, beside the two functions it explains, and a test checks that
+/// its totals equal theirs. An explanation that can drift from the computation
+/// is worse than none.
+pub fn explain(sessions: &[Session], c: &Config) -> Vec<String> {
+    use crate::scan::{KINDS, KIND_CACHE_1H, KIND_CACHE_5M, KIND_CACHE_READ, KIND_IN, KIND_OUT};
+    // Per model, over everything in scope. The Codex flag travels with the
+    // bucket: it decides which price list applies when a row has no model name.
+    let mut by: Vec<(String, bool, [u64; KINDS])> = Vec::new();
+    for s in sessions {
+        let codex = s.is_codex();
+        let rows: Vec<(String, [u64; KINDS])> = if s.usage.is_empty() {
+            vec![(
+                s.models.first().cloned().unwrap_or_default(),
+                [s.input_tokens, s.output_tokens, s.cache_read, s.cache_creation, 0],
+            )]
+        } else {
+            s.usage.clone()
+        };
+        for (m, u) in rows {
+            if u.iter().all(|&n| n == 0) {
+                continue;
+            }
+            match by.iter_mut().find(|(n, cx, _)| *n == m && *cx == codex) {
+                Some((_, _, acc)) => {
+                    for i in 0..KINDS {
+                        acc[i] += u[i];
+                    }
+                }
+                None => by.push((m, codex, u)),
+            }
+        }
+    }
+    by.sort_by(|a, b| b.2[KIND_OUT].cmp(&a.2[KIND_OUT]));
+
+    let n = |x: u64| -> String {
+        if x >= 1_000_000_000 {
+            format!("{:.1}G", x as f64 / 1e9)
+        } else if x >= 1_000_000 {
+            format!("{:.1}M", x as f64 / 1e6)
+        } else if x >= 1_000 {
+            format!("{:.0}k", x as f64 / 1e3)
+        } else {
+            x.to_string()
+        }
+    };
+
+    let mut out = Vec::new();
+    out.push(format!(
+        "Da dove vengono questi numeri ({} sessioni, listino del {}):",
+        sessions.len(),
+        if c.prices_as_of.trim().is_empty() { "?" } else { c.prices_as_of.trim() }
+    ));
+    if by.is_empty() {
+        out.push("  Nessun token registrato: non c'e' niente da spiegare.".into());
+        return out;
+    }
+
+    out.push(String::new());
+    out.push("COSTO — prezzo di listino per milione di token, modello per modello.".into());
+    out.push("  Una sessione che passa da Opus a Haiku non e' una sessione Opus:".into());
+    out.push("  ogni modello paga il suo, e le scritture di cache a un'ora costano".into());
+    out.push("  il doppio dell'input mentre quelle a cinque minuti 1.25x.".into());
+    let mut cost_tot = 0.0;
+    for (m, codex, u) in &by {
+        let p = price_for(&c.prices, m, *codex);
+        let parts = [
+            (u[KIND_IN], p.pin, "input"),
+            (u[KIND_OUT], p.pout, "output"),
+            (u[KIND_CACHE_READ], p.pcr, "cache letta"),
+            (u[KIND_CACHE_5M], p.pcw, "cache 5m"),
+            (u[KIND_CACHE_1H], p.pcw1h, "cache 1h"),
+        ];
+        let sub: f64 = parts.iter().map(|(t, pr, _)| *t as f64 * pr / 1e6).sum();
+        cost_tot += sub;
+        out.push(format!("  {}", if m.is_empty() { "(modello non registrato)" } else { m }));
+        for (t, pr, name) in parts {
+            if t > 0 {
+                out.push(format!(
+                    "    {:<12} {:>8} x ${:>6.2}/M = ${:>9.4}",
+                    name,
+                    n(t),
+                    pr,
+                    t as f64 * pr / 1e6
+                ));
+            }
+        }
+        out.push(format!("    {:<12} {:>30}${:>9.4}", "", "", sub));
+    }
+    out.push(format!("  TOTALE COSTO{:>29}${:>9.4}", "", cost_tot));
+
+    out.push(String::new());
+    out.push("ENERGIA — ancorata alla generazione, l'unica grandezza misurata.".into());
+    out.push(format!(
+        "  Un token generato = {} Wh (energyWhPerOutputToken).",
+        c.energy_wh_per_output_token
+    ));
+    out.push(format!(
+        "  Un token di input = quello / {OUTPUT_ENERGY_FACTOR} = {:.7} Wh: il prefill legge",
+        c.energy_wh_per_output_token / OUTPUT_ENERGY_FACTOR
+    ));
+    out.push("  tutto il prompt in una passata, la generazione rifa' un giro per token.".into());
+    out.push(format!(
+        "  Una lettura di cache = {CACHE_READ_ENERGY_FACTOR} di un token di input; le scritture = 1."
+    ));
+    out.push("  Poi tutto si scala con la taglia del modello: haiku 0.25, sonnet 1, opus 3.".into());
+    let per_input = c.energy_wh_per_output_token / OUTPUT_ENERGY_FACTOR;
+    let mut wh_tot = 0.0;
+    for (m, codex, u) in &by {
+        let f = model_energy_factor(m, *codex);
+        let weighted = u[KIND_IN] as f64
+            + u[KIND_OUT] as f64 * OUTPUT_ENERGY_FACTOR
+            + u[KIND_CACHE_READ] as f64 * CACHE_READ_ENERGY_FACTOR
+            + u[KIND_CACHE_5M] as f64
+            + u[KIND_CACHE_1H] as f64;
+        let wh = weighted * per_input * f;
+        wh_tot += wh;
+        out.push(format!(
+            "  {:<28} {:>9} token equivalenti x {:.7} x {} = {:.1} Wh",
+            if m.is_empty() { "(modello non registrato)" } else { m },
+            n(weighted as u64),
+            per_input,
+            f,
+            wh
+        ));
+    }
+    out.push(format!("  TOTALE ENERGIA{:>36}{:.1} Wh", "", wh_tot));
+
+    out.push(String::new());
+    out.push("ACQUA — derivata dall'energia, non contata sui token una seconda volta,".into());
+    out.push("  cosi' le due cifre non possono divergere.".into());
+    out.push(format!(
+        "  {:.1} Wh / 1000 x {} L/kWh (waterLPerKwh) = {:.3} L",
+        wh_tot,
+        c.water_l_per_kwh,
+        wh_tot / 1000.0 * c.water_l_per_kwh
+    ));
+    out.push(String::new());
+    out.push("Resta una stima all'ordine di grandezza: nessun fornitore pubblica".into());
+    out.push("l'energia per token. Quello che regge e' il CONFRONTO — fra due".into());
+    out.push("sessioni, due modelli o due mesi.".into());
+    if let Some(w) = prices_warning(&c.prices_as_of, &today_iso()) {
+        out.push(String::new());
+        out.push(format!("⚠ {w}"));
+    }
+    out
 }
 
 /// Prices for one model name.
@@ -313,6 +522,9 @@ fn parse(buf: &[u8], c: &mut Config) {
             "waterLPerKwh" => c.water_l_per_kwh = p.take_number().max(0.0),
             "vault" => c.vault = p.take_bool(),
             "retentionAsked" => c.retention_asked = p.take_bool(),
+            "mouseOnly" => c.mouse_only = p.take_bool(),
+            "pricesAsOf" => c.prices_as_of = p.take_string().unwrap_or_default(),
+            "tourDone" => c.tour_done = p.take_bool(),
             "syncEncrypt" => {
                 if let Some(v) = p.take_string() {
                     c.sync_encrypt = v;
@@ -480,7 +692,9 @@ pub fn save(base: &Path, c: &Config) {
         .collect::<Vec<_>>()
         .join(",\n");
     let txt = format!(
-        "{{\n  \"theme\": \"{}\",\n  \"pixel\": {},\n  \"watch\": {},\n  \"budget\": {},\n  \"energyWhPerOutputToken\": {},\n  \"waterLPerKwh\": {},\n  \"vault\": {},\n  \"retentionAsked\": {},\n  \"syncRepo\": \"{}\",\n  \"syncEncrypt\": \"{}\",\n  \"syncIdentity\": \"{}\",\n  \"favorites\": [{}],\n  \"remotes\": [{}],\n  \"notes\": {{{}}},\n  \"aliases\": {{{}}},\n  \"pathRemaps\": {{{}}},\n  \"prices\": {{\n    \"opus\":    {},\n    \"sonnet\":  {},\n    \"haiku\":   {},\n    \"gpt\":     {},\n    \"default\": {}\n  }}\n}}\n",
+        "{{\n  \"theme\": \"{}\",\n  \"pixel\": {},\n  \"watch\": {},\n  \"budget\": {},\n  \"energyWhPerOutputToken\": {},\n  \"waterLPerKwh\": {},\n  \"vault\": {},\n  \"retentionAsked\": {},
+  \"mouseOnly\": {},
+  \"tourDone\": {},\n  \"syncRepo\": \"{}\",\n  \"syncEncrypt\": \"{}\",\n  \"syncIdentity\": \"{}\",\n  \"favorites\": [{}],\n  \"remotes\": [{}],\n  \"notes\": {{{}}},\n  \"aliases\": {{{}}},\n  \"pathRemaps\": {{{}}},\n  \"pricesAsOf\": \"{}\",\n  \"prices\": {{\n    \"opus\":    {},\n    \"sonnet\":  {},\n    \"haiku\":   {},\n    \"gpt\":     {},\n    \"default\": {}\n  }}\n}}\n",
         crate::json::escape(&c.theme),
         c.pixel,
         c.watch,
@@ -489,6 +703,8 @@ pub fn save(base: &Path, c: &Config) {
         c.water_l_per_kwh,
         c.vault,
         c.retention_asked,
+        c.mouse_only,
+        c.tour_done,
         crate::json::escape(&c.sync_repo),
         crate::json::escape(&c.sync_encrypt),
         crate::json::escape(&c.sync_identity),
@@ -497,6 +713,7 @@ pub fn save(base: &Path, c: &Config) {
         obj_block(&c.notes),
         obj_block(&c.aliases),
         obj_block(&c.path_remaps),
+        crate::json::escape(&c.prices_as_of),
         pr(&c.prices.opus),
         pr(&c.prices.sonnet),
         pr(&c.prices.haiku),
@@ -512,6 +729,96 @@ pub fn save(base: &Path, c: &Config) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_explanation_adds_up_to_the_number_it_explains() {
+        use super::*;
+        use crate::scan::{KIND_CACHE_1H, KIND_CACHE_READ, KIND_IN, KIND_OUT};
+        // Una spiegazione che puo' divergere dal calcolo e' peggio di nessuna
+        // spiegazione: e' un numero sbagliato con l'aria di essere verificato.
+        let c = Config::default();
+        let mut a = crate::scan::Session::default();
+        a.add_usage("claude-opus-5", KIND_OUT, 340_000);
+        a.add_usage("claude-opus-5", KIND_IN, 1_200_000);
+        a.add_usage("claude-opus-5", KIND_CACHE_1H, 720_000_000);
+        a.add_usage("claude-haiku-4-5", KIND_CACHE_READ, 18_000_000);
+        let mut b = crate::scan::Session::default();
+        b.agent = "codex".into();
+        b.add_usage("gpt-5", KIND_OUT, 90_000);
+        let sessions = vec![a, b];
+
+        let lines = explain(&sessions, &c);
+        let text = lines.join("\n");
+
+        let want_cost: f64 = sessions.iter().map(|s| cost(s, &c.prices)).sum();
+        let (want_wh, want_l) = sessions
+            .iter()
+            .map(|s| footprint(s, c.energy_wh_per_output_token, c.water_l_per_kwh))
+            .fold((0.0, 0.0), |(e, w), (de, dw)| (e + de, w + dw));
+
+        let grab = |marker: &str| -> f64 {
+            let l = lines.iter().find(|l| l.contains(marker)).unwrap_or_else(|| panic!("manca «{marker}»"));
+            l.chars()
+                .filter(|ch| ch.is_ascii_digit() || *ch == '.')
+                .collect::<String>()
+                .trim_matches('.')
+                .parse()
+                .unwrap_or_else(|e| panic!("«{l}» non contiene un numero: {e}"))
+        };
+        assert!((grab("TOTALE COSTO") - want_cost).abs() < 0.001, "costo: {text}");
+        assert!((grab("TOTALE ENERGIA") - want_wh).abs() < 0.2, "energia: {text}");
+
+        // L'acqua si legge dalla sua riga e deve venire dall'energia.
+        let water_line = lines.iter().find(|l| l.contains("L/kWh (waterLPerKwh)")).expect("riga acqua");
+        let shown: f64 = water_line.rsplit('=').next().unwrap().trim().trim_end_matches(" L").parse().unwrap();
+        assert!((shown - want_l / 1000.0).abs() < 0.01, "acqua: {water_line}");
+
+        // E la catena si vede tutta, non solo i totali.
+        for piece in ["claude-opus-5", "claude-haiku-4-5", "gpt-5", "cache 1h", "token equivalenti"] {
+            assert!(text.contains(piece), "manca «{piece}» nella spiegazione");
+        }
+    }
+
+    #[test]
+    fn old_prices_say_so_and_fresh_ones_stay_quiet() {
+        use super::*;
+        // Il caso normale e' il silenzio: un avviso sempre presente smette di
+        // essere letto, e allora tanto vale non averlo.
+        assert_eq!(prices_warning("2026-09-15", "2026-09-16"), None);
+        assert_eq!(prices_age_days("2026-09-15", "2026-09-16"), Some(1));
+        assert_eq!(prices_age_days("2026-01-01", "2026-12-31"), Some(364));
+
+        let w = prices_warning("2026-01-01", "2026-09-16").expect("otto mesi e' vecchio");
+        assert!(w.contains("2026-01-01"), "l'avviso dice DA QUANDO: {w}");
+        assert!(w.contains("pricesAsOf"), "e dice cosa aggiornare: {w}");
+        // Il giorno esatto della soglia conta gia' come vecchio.
+        assert!(prices_warning("2026-01-01", "2026-06-30").is_some(), "180 giorni tondi");
+        assert!(prices_warning("2026-01-01", "2026-06-29").is_none(), "179 giorni");
+
+        // Una data assente o storta non passa in silenzio: un file scritto a
+        // mano e' proprio il caso in cui il numero merita un dubbio.
+        assert!(prices_warning("", "2026-09-16").is_some());
+        assert!(prices_warning("settembre", "2026-09-16").is_some());
+        assert_eq!(prices_age_days("2026-13-40", "2026-09-16"), None);
+    }
+
+    #[test]
+    fn a_config_without_the_date_does_not_invent_one() {
+        use super::*;
+        // I phosphor.json gia' in giro non hanno la chiave. Il default di
+        // Config la mette, ma un file che esiste e non la contiene descrive
+        // prezzi di data ignota — ed e' cosi' che va trattato.
+        let mut c = Config::default();
+        assert_eq!(c.prices_as_of, PRICES_CHECKED);
+        c.prices_as_of.clear();
+        parse(b"{\"theme\":\"ambra\",\"budget\":50}", &mut c);
+        assert_eq!(c.theme, "ambra");
+        assert!(c.prices_as_of.is_empty(), "nessuna data inventata");
+        assert!(prices_warning(&c.prices_as_of, &today_iso()).is_some());
+
+        parse(b"{\"pricesAsOf\":\"2026-09-15\"}", &mut c);
+        assert_eq!(c.prices_as_of, "2026-09-15");
+    }
+
     #[test]
     fn a_session_is_priced_model_by_model_not_by_the_first_one() {
         use crate::scan::{KIND_IN, KIND_OUT};
