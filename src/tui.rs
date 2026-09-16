@@ -1458,7 +1458,25 @@ impl App {
     /// prima e occupa la modale, quindi il giro deve poter aspettare il suo
     /// turno invece di essere saltato per sempre.
     fn maybe_show_tour(&mut self) {
-        if !self.tour_todo || self.confirm.is_some() || self.dry {
+        if !self.tour_todo || self.dry {
+            return;
+        }
+        // Aspetta che lo schermo sia libero. Senza questo controllo bastava
+        // aprire l'aiuto o cominciare a scrivere nella ricerca nei primi
+        // istanti perche' il benvenuto ci saltasse sopra — e un benvenuto che
+        // interrompe e' peggio che nessun benvenuto.
+        let busy = self.confirm.is_some()
+            || self.delproj.is_some()
+            || self.menu.is_some()
+            || self.picker.is_some()
+            || self.reader.is_some()
+            || self.gsearch.is_some()
+            || self.help
+            || self.detail
+            || self.show_agents
+            || self.searching
+            || self.note_editing;
+        if busy {
             return;
         }
         self.tour_page(0);
@@ -2457,8 +2475,17 @@ pub fn selftest(base: PathBuf, all: Vec<Session>, cache: Arc<Mutex<HashMap<Strin
             let _ = handle_key(&mut app, KeyCode::PageDown, KeyModifiers::empty());
             let _ = handle_key(&mut app, KeyCode::End, KeyModifiers::empty());
             term.draw(|f| ui(f, &mut app)).expect("draw reader 2");
-            let _ = handle_mouse(&mut app, mk_click(sz.0 / 2, sz.1 / 2));
-            assert!(app.reader.is_none(), "un click deve chiudere il lettore");
+            // Il contratto e' cambiato, e questo selftest teneva ancora il
+            // vecchio: si clicca DENTRO per usare il lettore — prima un click
+            // qualunque lo chiudeva, quindi non ci si poteva fare niente — e
+            // FUORI per chiuderlo.
+            let mid = (sz.0 / 2, sz.1 / 2);
+            let _ = handle_mouse(&mut app, mk_click(mid.0, mid.1));
+            assert!(app.reader.is_some(), "un click dentro NON deve chiudere il lettore");
+            let out = app.rect_overlay;
+            assert!(out.width > 0, "il lettore deve registrare il suo riquadro");
+            let _ = handle_mouse(&mut app, mk_click(out.x.saturating_sub(1), out.y));
+            assert!(app.reader.is_none(), "un click fuori deve chiudere il lettore");
 
             // global content search: open, type (short → no heavy grep), render,
             // browse, close. open_reader_at jump path is rendered too.
@@ -3443,7 +3470,14 @@ fn render_confirm(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         Some(c) => (c.title.clone(), c.lines.clone()),
         None => return,
     };
-    let pop = centered(area, 70, 50);
+    // La finestra prende l'altezza che il testo chiede, invece di un 50% fisso:
+    // la domanda sulla retention e il benvenuto hanno quattordici righe, e su
+    // un terminale da 24 righe le ultime sparivano senza che niente lo dicesse
+    // — comprese quelle che dicono cosa fare. Due per i bordi, una per i
+    // bottoni; il tetto e' il 90%, cosi' resta chiaro che e' una finestra.
+    let want = (lines.len() as u16 + 3).min(area.height);
+    let ph = ((want as u32 * 100 / area.height.max(1) as u32) as u16).clamp(40, 90);
+    let pop = centered(area, 70, ph);
     f.render_widget(Clear, pop);
     let block = Block::default().borders(Borders::ALL).border_type(btype(app.pixel))
         .border_style(Style::default().fg(th.accent)).style(Style::default().bg(th.bg))
@@ -4589,6 +4623,16 @@ mod tree_tests {
         assert_eq!(app.confirm.as_ref().unwrap().title, " ALTRO ", "non scavalca la retention");
         app.confirm = None;
 
+        // Ne' salta sopra a un pannello aperto.
+        app.help = true;
+        app.maybe_show_tour();
+        assert!(app.confirm.is_none(), "non interrompe l'aiuto");
+        app.help = false;
+        app.searching = true;
+        app.maybe_show_tour();
+        assert!(app.confirm.is_none(), "non interrompe chi sta scrivendo");
+        app.searching = false;
+
         // Poi arriva, e si sfoglia col mouse: i bottoni dicono cosa fanno.
         app.maybe_show_tour();
         for page in 0..App::TOUR_PAGES {
@@ -4882,6 +4926,64 @@ mod tree_tests {
         // senza overlay disegnato non esiste un "fuori"
         app.rect_overlay = Rect { x: 0, y: 0, width: 0, height: 0 };
         assert!(!clicked_outside(&app, &click(2, 2)));
+    }
+
+    #[test]
+    fn a_long_confirmation_is_not_cut_off_on_a_short_terminal() {
+        // La domanda sulla retention e il benvenuto hanno quattordici righe. Con
+        // l'altezza fissa al 50%, su un terminale da 24 righe sparivano le
+        // ultime — cioe' proprio quelle che dicono cosa fare — e nulla lo
+        // segnalava. I bottoni devono restare dentro in ogni caso.
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
+        let lines: Vec<String> = (0..14).map(|i| format!("riga numero {i} del testo")).collect();
+        for (w, h) in [(120u16, 40u16), (100, 30), (90, 24), (80, 20)] {
+            app.confirm = Some(Confirm {
+                title: " PROVA ".into(),
+                lines: lines.clone(),
+                action: Pending::TourDone,
+                alts: Vec::new(),
+                buttons: None,
+                cancel: None,
+            });
+            let mut term = Terminal::new(TestBackend::new(w, h)).expect("backend");
+            term.draw(|f| ui(f, &mut app)).expect("disegno");
+            let b = app.rect_confirm_buttons[0];
+            assert!(b.y < h, "a {w}x{h} i bottoni finiscono fuori schermo");
+            // Il testo entra: la finestra e' alta almeno quanto serve, finche'
+            // il terminale lo consente.
+            let needed = (lines.len() as u16 + 3).min(h);
+            let got = centered(Rect { x: 0, y: 0, width: w, height: h }, 70, ((needed as u32 * 100 / h as u32) as u16).clamp(40, 90)).height;
+            assert!(got + 1 >= needed, "a {w}x{h}: servono {needed} righe, la finestra ne ha {got}");
+        }
+        app.confirm = None;
+    }
+
+    #[test]
+    fn no_help_row_becomes_a_command_by_accident() {
+        // Il bug che questo chiude: la riga «find <testo>», che documenta il
+        // comando DA TERMINALE  phosphor find , cominciava per «f» e la regola
+        // starts_with la faceva diventare il filtro di stato. Cliccare una
+        // spiegazione cambiava un'impostazione.
+        assert_eq!(help::action("find <testo>"), 0, "e' un comando da terminale");
+        for cli in ["cost", "limits", "watch", "clean", "export-all", "mcp", "~uso 5h/7g"] {
+            assert_eq!(help::action(cli), 0, "«{cli}» non e' un'azione della TUI");
+        }
+
+        // E la regola generale, che si controlla da sola quando l'aiuto cresce:
+        // una riga e' cliccabile solo se la sua PRIMA PAROLA e' un comando.
+        for l in help::lines(&theme(0)) {
+            let key = l.spans.first().map(|s| s.content.trim().to_string()).unwrap_or_default();
+            if help::action(&key) == 0 {
+                continue;
+            }
+            let first = key.split_whitespace().next().unwrap_or("");
+            assert!(
+                help::COMMAND_KEYS.contains(&first),
+                "la riga «{key}» esegue qualcosa ma «{first}» non e' un comando"
+            );
+        }
     }
 
     #[test]

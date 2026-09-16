@@ -795,15 +795,20 @@ mod tests {
 
 /// Re-scan against a server State's live cache and swap its session list.
 pub fn rescan(state: &Arc<State>) -> bool {
-    let projects = state.base.join("projects");
+    // `scan_all`, non `scan_incremental`: quest'ultimo vede SOLO i transcript di
+    // Claude Code. Il dashboard web partiva con l'elenco completo e poi il suo
+    // watcher lo sostituiva con quello parziale — su questo PC da 258 sessioni a
+    // 22, cioe' sparivano Codex, il vault e le sessioni recuperate, pochi
+    // secondi dopo l'avvio e senza che niente lo dicesse.
     let (mut sessions, changed) = {
         let mut c = state.cache.lock().unwrap();
-        scan::scan_incremental(&projects, &mut c)
+        scan_all(&state.base, &mut c)
     };
     live::annotate(&state.base, &mut sessions);
     if changed {
         cache::save(&state.base, &sessions);
     }
+    add_recovered(&state.base, &mut sessions);
     *state.sessions.write().unwrap() = sessions;
     changed
 }

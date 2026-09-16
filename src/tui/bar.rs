@@ -34,7 +34,11 @@ pub(super) fn shortcut_chips(app: &App) -> Vec<Vec<(&'static str, &'static str, 
     }
     if app.tab == 0 {
         vec![
-            vec![("↑", "", A_UP), ("↓", "", A_DOWN), ("+/-", "riprese", 0)],
+            // Il chip delle riprese esegue A_EXPAND_ALL: apre o chiude tutti i
+            // gruppi. I tasti + e - lavorano sul gruppo selezionato, ma col
+            // mouse la selezione la fai cliccando la riga, e un chip che si
+            // vede e non fa niente e' peggio di uno che fa la cosa vicina.
+            vec![("↑", "", A_UP), ("↓", "", A_DOWN), ("+/-", "riprese", A_EXPAND_ALL)],
             vec![("/", "cerca", A_SEARCH), ("f", "filtro", A_FILTER), ("o", "ord", A_SORTCOL), ("s", "dir", A_SORTDIR)],
             vec![("⏎", "dett", A_DETAIL), ("v", "leggi", A_READ), ("g", "cerca tutto", A_GSEARCH), ("a", "agenti", A_AGENTS), ("r", "ripr", A_RESUME), ("e", "export", A_EXPORT)],
             vec![("A", "espandi/comprimi", A_EXPAND_ALL), ("x", "porta", A_EXPBUNDLE), ("i", "importa", A_IMPORT), ("t", "tema", A_THEME_NEXT), ("p", "px", A_PIXEL), ("?", "aiuto", A_HELP), ("🖰", if app.mouse_only { "solo mouse" } else { "mouse+tasti" }, A_MOUSE_MODE), ("q", "esci", A_QUIT)],
@@ -140,10 +144,16 @@ pub(super) fn render_shortcut_bar(app: &mut App, th: &Theme, area: Rect) -> Para
             prev_gi = Some(p.gi);
             let (_, mouse) = chip_width(key, label, app.mouse_only);
             if mouse {
-                spans.push(Span::styled(
-                    label.to_string(),
-                    Style::default().fg(th.accent).add_modifier(Modifier::BOLD),
-                ));
+                // In solo-mouse la promessa e' «cio' che risalta si clicca», e
+                // alcune voci sono solo informative (la rotella, il +/- dei
+                // gruppi). In grassetto come le altre sarebbero parole che
+                // invitano a cliccare e non fanno niente: restano spente.
+                let st = if action == 0 {
+                    Style::default().fg(th.dim)
+                } else {
+                    Style::default().fg(th.accent).add_modifier(Modifier::BOLD)
+                };
+                spans.push(Span::styled(label.to_string(), st));
             } else {
                 spans.push(Span::styled(key.to_string(), Style::default().fg(th.accent).add_modifier(Modifier::BOLD)));
                 if !label.is_empty() {

@@ -1441,6 +1441,12 @@ fn main() {
     let mut wrapped_no_cost = false;
     let mut base = claude_base();
 
+    // Opzioni e comandi a cui manca il loro argomento. Senza questo elenco
+    // finivano in `None` in silenzio e il programma cadeva fino in fondo, cioe'
+    // APRIVA LA TUI: chi scriveva `phosphor find` dimenticando il testo si
+    // trovava l'applicazione intera al posto di una ricerca, e in uno script si
+    // trovava un processo che non finiva piu'.
+    let mut missing: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -1456,6 +1462,7 @@ fn main() {
             "--explain" | "--spiega" => explain = true,
             "--no-cost" => wrapped_no_cost = true,
             "--window" => {
+                if args.get(i + 1).is_none() { missing.push("--window <periodo>".into()); }
                 if let Some(v) = args.get(i + 1) {
                     wrapped_window = Some(v.clone());
                     i += 1;
@@ -1464,12 +1471,14 @@ fn main() {
             "--delete-empty" => delete_empty = true,
             "--delete-project" => {
                 delete_project = args.get(i + 1).cloned();
-                if delete_project.is_some() {
-                    i += 1;
+                match delete_project.is_some() {
+                    true => i += 1,
+                    false => missing.push("--delete-project <nome>".into()),
                 }
             }
             "--archive-project" => {
                 archive_project = args.get(i + 1).cloned();
+                if archive_project.is_none() { missing.push("--archive-project <nome>".into()); }
                 if archive_project.is_some() {
                     i += 1;
                 }
@@ -1520,6 +1529,7 @@ fn main() {
                     i += 1;
                     if sub == "set" {
                         sync_set_path = args.get(i + 1).cloned();
+                        if sync_set_path.is_none() { missing.push("sync set <cartella>".into()); }
                         if sync_set_path.is_some() {
                             i += 1;
                         }
@@ -1528,8 +1538,9 @@ fn main() {
             }
             "import" => {
                 import_path = args.get(i + 1).cloned();
-                if import_path.is_some() {
-                    i += 1;
+                match import_path.is_some() {
+                    true => i += 1,
+                    false => missing.push("import <file.phx>".into()),
                 }
             }
             "remote" => {
@@ -1552,8 +1563,9 @@ fn main() {
             "fleet" => fleet_mode = true,
             "resume-here" => {
                 resume_here = args.get(i + 1).cloned();
-                if resume_here.is_some() {
-                    i += 1;
+                match resume_here.is_some() {
+                    true => i += 1,
+                    false => missing.push("resume-here <id>".into()),
                 }
             }
             "--remap" => {
@@ -1570,16 +1582,15 @@ fn main() {
                     i += 1;
                 }
             }
-            "--out" => {
-                if let Some(v) = args.get(i + 1) {
-                    out_path = Some(PathBuf::from(v));
-                    i += 1;
-                }
-            }
+            "--out" => match args.get(i + 1) {
+                Some(v) => { out_path = Some(PathBuf::from(v)); i += 1; }
+                None => missing.push("--out <file>".into()),
+            },
             "find" | "search" => {
                 find_query = args.get(i + 1).map(|s| s.to_lowercase());
-                if find_query.is_some() {
-                    i += 1;
+                match find_query.is_some() {
+                    true => i += 1,
+                    false => missing.push("find <testo>".into()),
                 }
             }
             "--web" => web_mode = true,
@@ -1587,30 +1598,22 @@ fn main() {
             "--selftest" => selftest_mode = true,
             "--no-open" => open = false,
             "--running" => running_only = true,
-            "--project" => {
-                if let Some(v) = args.get(i + 1) {
-                    project_filter = Some(v.clone());
-                    i += 1;
-                }
-            }
-            "--port" => {
-                if let Some(v) = args.get(i + 1).and_then(|x| x.parse::<u16>().ok()) {
-                    port = v;
-                    i += 1;
-                }
-            }
-            "--watch" => {
-                if let Some(v) = args.get(i + 1).and_then(|x| x.parse::<u64>().ok()) {
-                    watch_opt = Some(v.max(1));
-                    i += 1;
-                }
-            }
-            "--dir" => {
-                if let Some(v) = args.get(i + 1) {
-                    base = PathBuf::from(v);
-                    i += 1;
-                }
-            }
+            "--project" => match args.get(i + 1) {
+                Some(v) => { project_filter = Some(v.clone()); i += 1; }
+                None => missing.push("--project <testo>".into()),
+            },
+            "--port" => match args.get(i + 1).and_then(|x| x.parse::<u16>().ok()) {
+                Some(v) => { port = v; i += 1; }
+                None => missing.push("--port <numero>".into()),
+            },
+            "--watch" => match args.get(i + 1).and_then(|x| x.parse::<u64>().ok()) {
+                Some(v) => { watch_opt = Some(v.max(1)); i += 1; }
+                None => missing.push("--watch <secondi>".into()),
+            },
+            "--dir" => match args.get(i + 1) {
+                Some(v) => { base = PathBuf::from(v); i += 1; }
+                None => missing.push("--dir <cartella>".into()),
+            },
             "-h" | "--help" => {
                 help();
                 return;
@@ -1622,6 +1625,18 @@ fn main() {
             _ => {}
         }
         i += 1;
+    }
+
+    // Un argomento che manca va detto, non ignorato. Prima cadeva in `None` in
+    // silenzio e il programma proseguiva fino ad APRIRE LA TUI: chi scriveva
+    // `phosphor find` senza il testo si trovava l'applicazione intera al posto
+    // di una ricerca, e in uno script un processo che non finiva piu'.
+    if !missing.is_empty() {
+        for m in &missing {
+            eprintln!("Argomento mancante o non valido:  {m}");
+        }
+        eprintln!("\n  phosphor --help   per l'elenco completo");
+        std::process::exit(2);
     }
 
     // Import works even on a fresh machine (no existing sessions yet), so handle

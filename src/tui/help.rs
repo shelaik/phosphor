@@ -17,7 +17,14 @@ use super::*;
 /// The key shown at the start of a row IS the row's identity, so it is what
 /// this keys on: no parallel list to keep in step with the text.
 pub(super) fn action(key: &str) -> u16 {
-    match key {
+    // La PRIMA parola, non un prefisso qualunque. Con `starts_with` la riga
+    // «find <testo>» — che documenta il comando da terminale `phosphor find` —
+    // cominciava per «f» e diventava il filtro di stato: cliccare una
+    // spiegazione cambiava un'impostazione. Una riga e' un comando solo se la
+    // sua chiave E' quel comando.
+    //
+    // Le righe doppie («r  ·  e») eseguono la prima: e' il titolo della riga.
+    match key.split_whitespace().next().unwrap_or("") {
         "⏎" => A_DETAIL,
         "v" => A_READ,
         "g" => A_GSEARCH,
@@ -32,16 +39,25 @@ pub(super) fn action(key: &str) -> u16 {
         "V" => A_VAULT_RESTORE,
         "F" => A_FLEET,
         "D" => A_DELPROJECT,
-        k if k.starts_with("*") => A_FAVORITE,
-        k if k.starts_with("O") => A_OPENFOLDER,
-        k if k.starts_with("f") => A_FILTER,
-        k if k.starts_with("r") => A_RESUME,
-        k if k.starts_with("x") => A_EXPBUNDLE,
-        k if k.starts_with("t/T") => A_THEME_NEXT,
-        k if k.starts_with("R") => A_RESCAN,
+        "*" => A_FAVORITE,
+        "O" => A_OPENFOLDER,
+        "f" => A_FILTER,
+        "r" => A_RESUME,
+        "x" => A_EXPBUNDLE,
+        "t/T" => A_THEME_NEXT,
+        "R" => A_RESCAN,
         _ => 0,
     }
 }
+
+/// Le chiavi che sono comandi. Serve al test che controlla che nessuna riga
+/// diventi cliccabile per sbaglio: e' l'elenco completo, e deve restare
+/// d'accordo con [`action`].
+#[cfg(test)]
+pub(super) const COMMAND_KEYS: [&str; 21] = [
+    "⏎", "v", "g", "M", "N", "a", "/", "m", "A", "H", "W", "V", "F", "D", "*", "O", "f", "r", "x",
+    "t/T", "R",
+];
 
 /// Every line of the panel, styled. `'static` because the text is all literals
 /// and the caller scrolls it.

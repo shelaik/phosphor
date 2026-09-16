@@ -35,7 +35,13 @@ if (-not $DryRun -and (git status --porcelain)) {
 if (git tag --list $tag)                                  { throw "Il tag $tag esiste già in locale. Bumpa la versione in Cargo.toml." }
 if (git ls-remote --tags origin "refs/tags/$tag")        { throw "Il tag remoto $tag esiste già." }
 
-# 3) build pulita (rimappa la home utente: niente username nei binari)
+# 3) la suite deve essere verde PRIMA di costruire qualcosa da pubblicare.
+# Mancava: si poteva rilasciare con i test rossi e non se ne accorgeva nessuno.
+Write-Host "cargo test …" -ForegroundColor Cyan
+cargo test
+if ($LASTEXITCODE -ne 0) { throw "cargo test FALLITO: niente release." }
+
+# 3b) build pulita (rimappa la home utente: niente username nei binari)
 $prev = $env:RUSTFLAGS
 $env:RUSTFLAGS = "--remap-path-prefix=$($env:USERPROFILE)=~"
 try { cargo build --release --features adventure } finally { $env:RUSTFLAGS = $prev }
@@ -46,6 +52,14 @@ if ($stamp -notmatch ("v" + [regex]::Escape($ver) + "(\b|$)")) {
     throw "MISMATCH versione: il binario riporta '$stamp' ma Cargo.toml dice v$ver."
 }
 Write-Host "OK — binario allineato: $stamp" -ForegroundColor Green
+
+# 4b) il selftest gira la TUI vera sullo store vero: e' l'unica prova che quello
+# che stiamo per pubblicare si apre e risponde. Non lo eseguiva nessuno, e
+# infatti conteneva un contratto vecchio di mesi senza che si vedesse.
+Write-Host "selftest …" -ForegroundColor Cyan
+$self = (& ".\target\release\phosphor.exe" --selftest 2>&1 | Out-String)
+if ($self -notmatch "selftest TUI: OK") { throw "SELFTEST FALLITO:`n$self" }
+Write-Host "OK — selftest passato" -ForegroundColor Green
 
 if ($DryRun) {
     Write-Host "DryRun: tutti i controlli superati. Niente tag/release pubblicati." -ForegroundColor Yellow
