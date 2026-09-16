@@ -7,18 +7,60 @@ use crate::scan::Session;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Every cache file starts with this and ends with [`SUFFIX`]; what sits
+/// between the two is the key, and nothing else in `~/.claude` looks like this.
+const PREFIX: &str = ".phosphor-cache.";
+const SUFFIX: &str = ".jsonl";
+
+/// The name of the cache file for THIS build.
+///
+/// The key is computed by `build.rs` from the modules a cached row is derived
+/// from (the parsers, the JSON primitives, this serializer). Change any of
+/// them and the name changes, so the old cache is not read: a fix to a parser
+/// reaches the transcripts that were already scanned, without anyone having to
+/// remember anything.
+///
+/// It used to be a hand-written `v9` with a comment asking the next person to
+/// bump it. A comment is the weakest defence there is — the one time it is
+/// missed, the symptom is a fix that appears not to work.
+pub fn cache_name() -> String {
+    format!("{PREFIX}{}{SUFFIX}", env!("PHOSPHOR_CACHE_KEY"))
+}
+
 fn cache_path(base: &Path) -> PathBuf {
-    // Versioned: bumping this invalidates old caches. Bump it for a change in
-    // the SHAPE of an entry *or* in how one is derived — a cached row is reused
-    // whenever path+size+mtime match, so a parser fix alone would never reach
-    // the transcripts already scanned (v7: Codex titles).
-    base.join(".phosphor-cache.v9.jsonl")
+    base.join(cache_name())
+}
+
+/// Delete the cache files of other builds.
+///
+/// Now that the name follows the source, a week of work on a parser would
+/// otherwise leave a small heap of dead caches in `~/.claude`. Deliberately
+/// narrow: direct children of `base` only, regular files only, and only names
+/// shaped exactly like ours. It never recurses, so the vault directory is out
+/// of reach by construction.
+fn sweep(base: &Path, keep: &Path) {
+    let rd = match std::fs::read_dir(base) {
+        Ok(rd) => rd,
+        Err(_) => return,
+    };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !name.starts_with(PREFIX) || !name.ends_with(SUFFIX) || name.len() <= PREFIX.len() + SUFFIX.len() {
+            continue;
+        }
+        let p = e.path();
+        if p == keep || !e.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let _ = std::fs::remove_file(&p);
+    }
 }
 
 pub fn load(base: &Path) -> HashMap<String, Session> {
     let mut map = HashMap::new();
-    // NB: we never delete anything here. Superseded cache files (old name/schema)
-    // are simply ignored and left in place (harmless ~100KB orphans).
+    // Reading never deletes: a cache of another build is simply not ours to
+    // read. They are cleared away by the next `save`, once this run has
+    // produced something to replace them with.
     let p = cache_path(base);
     let data = match std::fs::read(&p) {
         Ok(d) => d,
@@ -42,8 +84,11 @@ pub fn save(base: &Path, sessions: &[Session]) {
         buf.push('\n');
     }
     let tmp = base.join(".phosphor-cache.tmp");
-    if std::fs::write(&tmp, &buf).is_ok() {
-        let _ = std::fs::rename(&tmp, cache_path(base));
+    let p = cache_path(base);
+    if std::fs::write(&tmp, &buf).is_ok() && std::fs::rename(&tmp, &p).is_ok() {
+        // Only after ours is safely in place: a sweep that ran first would, on
+        // a failed write, leave the user with no cache at all.
+        sweep(base, &p);
     }
 }
 
@@ -252,4 +297,112 @@ fn parse_line(buf: &[u8]) -> Option<Session> {
         return None;
     }
     Some(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scan::{KIND_CACHE_5M, KIND_IN, KIND_OUT};
+
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    fn tmp() -> PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "phosphor-cache-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    fn a_session() -> Session {
+        let mut s = Session::default();
+        s.id = "16b42417-0000-4000-8000-000000000001".into();
+        s.path = r"C:\Users\dev\.claude\projects\C--p\16b42417.jsonl".into();
+        s.project_name = "p".into();
+        s.title = r#"una sessione con "virgolette" e \ backslash"#.into();
+        s.size = 4096;
+        s.mtime_ms = 1_700_000_000_000;
+        s.corrections = 3;
+        s.agent = "codex".into();
+        s.kin_sketch = vec![0xdead_beef_dead_beef, 1];
+        s.add_usage("opus", KIND_IN, 1000);
+        s.add_usage("opus", KIND_OUT, 250);
+        s.add_usage("haiku", KIND_CACHE_5M, 7);
+        s
+    }
+
+    #[test]
+    fn a_row_survives_the_round_trip_intact() {
+        // Il serializzatore e' scritto a mano: se un campo si perde qui, il
+        // programma mostra un numero sbagliato SOLO al secondo avvio, quando
+        // la riga arriva dalla cache invece che dal transcript. E' il tipo di
+        // bug che si vede giorni dopo averlo scritto.
+        let s = a_session();
+        let line = to_line(&s);
+        let back = parse_line(line.trim().as_bytes()).expect("riga rileggibile");
+        assert_eq!(back.id, s.id);
+        assert_eq!(back.path, s.path);
+        assert_eq!(back.title, s.title, "escape di virgolette e backslash");
+        assert_eq!(back.size, s.size);
+        assert_eq!(back.mtime_ms, s.mtime_ms);
+        assert_eq!(back.corrections, s.corrections);
+        assert_eq!(back.agent, s.agent);
+        assert_eq!(back.kin_sketch, s.kin_sketch, "u64 esatti, non f64 JSON");
+        assert_eq!(back.usage, s.usage, "i bucket per modello");
+        assert_eq!(back.input_tokens, 1000);
+        assert_eq!(back.output_tokens, 250);
+    }
+
+    #[test]
+    fn the_name_carries_the_fingerprint_of_the_parsers() {
+        let name = cache_name();
+        let key = name
+            .strip_prefix(PREFIX)
+            .and_then(|r| r.strip_suffix(SUFFIX))
+            .expect("nome nella forma attesa");
+        assert_eq!(key.len(), 10, "chiave: {key}");
+        assert!(key.chars().all(|c| c.is_ascii_hexdigit()), "chiave: {key}");
+    }
+
+    #[test]
+    fn save_clears_other_builds_caches_and_leaves_everything_else_alone() {
+        // Ora che il nome segue il sorgente, senza pulizia una settimana di
+        // lavoro sul parser lascerebbe un mucchietto di cache morte in
+        // ~/.claude. La pulizia pero' e' dentro la cartella dell'utente:
+        // questo test e' il recinto.
+        let base = tmp();
+        let decoys = [
+            "phosphor.json",
+            "settings.json",
+            ".phosphor-cache.jsonl",   // prefisso+suffisso ma chiave vuota
+            "phosphor-cache.v1.jsonl", // senza il punto iniziale
+        ];
+        for d in decoys {
+            std::fs::write(base.join(d), b"non toccare").unwrap();
+        }
+        std::fs::write(base.join(".phosphor-cache.v9.jsonl"), b"vecchia").unwrap();
+        std::fs::write(base.join(".phosphor-cache.0011223344.jsonl"), b"altra build").unwrap();
+        // Una CARTELLA che si chiama come una cache: non e' un file, si salva.
+        std::fs::create_dir(base.join(".phosphor-cache.aabbccddee.jsonl")).unwrap();
+
+        save(&base, &[a_session()]);
+
+        assert!(cache_path(&base).exists(), "la nostra cache c'e'");
+        assert!(!base.join(".phosphor-cache.v9.jsonl").exists(), "la v9 va via");
+        assert!(!base.join(".phosphor-cache.0011223344.jsonl").exists(), "l'altra build va via");
+        assert!(base.join(".phosphor-cache.aabbccddee.jsonl").is_dir(), "la cartella resta");
+        for d in decoys {
+            assert!(base.join(d).exists(), "«{d}» non doveva essere toccato");
+        }
+        assert!(
+            !base.join(".phosphor-cache.tmp").exists(),
+            "il temporaneo se lo porta via il rename, non resta di mezzo"
+        );
+        // E quello che ha scritto si rilegge.
+        let back = load(&base);
+        assert_eq!(back.len(), 1);
+        std::fs::remove_dir_all(&base).ok();
+    }
 }

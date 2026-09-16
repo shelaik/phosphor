@@ -35,6 +35,7 @@ fn main() {
     println!("cargo:rustc-env=PHOSPHOR_GIT={hash}");
     println!("cargo:rustc-env=PHOSPHOR_GIT_DIRTY={dirty}");
     println!("cargo:rustc-env=PHOSPHOR_COMMIT_DATE={date}");
+    println!("cargo:rustc-env=PHOSPHOR_CACHE_KEY={}", cache_key());
 
     // Re-run when HEAD moves or the index changes, so the stamp stays fresh.
     println!("cargo:rerun-if-changed=.git/HEAD");
@@ -43,6 +44,50 @@ fn main() {
     println!("cargo:rerun-if-changed=assets/phosphor.ico");
 
     embed_icon();
+}
+
+/// The modules a cached row is DERIVED from: the two parsers, the primitives
+/// they parse with, the two producers of derived fields, and the serializer
+/// that decides an entry's shape.
+///
+/// Anything outside this list can change without making a cached row wrong —
+/// which is the point. Hashing all of `src/` would invalidate every cache on a
+/// one-word change to the TUI, forcing a full rescan exactly when the work has
+/// nothing to do with parsing.
+const CACHE_INPUTS: [&str; 6] = [
+    "src/cache.rs",
+    "src/scan.rs",
+    "src/codex.rs",
+    "src/corrections.rs",
+    "src/json.rs",
+    "src/recover.rs",
+];
+
+/// A short fingerprint of those modules, which becomes part of the cache file
+/// name.
+///
+/// A cached row is reused whenever path+size+mtime match, so a fix to a parser
+/// would never reach the transcripts already scanned — the cache had to be
+/// invalidated BY HAND, by remembering to bump a version number in another
+/// file. That is the weakest defence there is: the one time it is forgotten,
+/// the symptom is a fix that appears not to work. Deriving the name from the
+/// source moves the rule from discipline to the compiler.
+fn cache_key() -> String {
+    // FNV-1a, 64-bit. Not cryptographic and does not need to be: it answers
+    // "did these bytes change", and an attacker who can edit the sources has
+    // already won.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for path in CACHE_INPUTS {
+        println!("cargo:rerun-if-changed={path}");
+        // A missing file hashes as its name alone: the key still changes if one
+        // is added or removed, and the build does not fail over it.
+        let bytes = std::fs::read(path).unwrap_or_default();
+        for b in path.bytes().chain(bytes) {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    format!("{h:016x}")[..10].to_string()
 }
 
 /// Give the executable its icon, so Explorer, the taskbar and Alt+Tab show

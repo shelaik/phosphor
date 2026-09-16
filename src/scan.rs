@@ -684,6 +684,10 @@ fn parse_session(path: &Path, size: u64) -> Option<Session> {
     let mut files: HashSet<String> = HashSet::new();
     let mut search = String::new();
     let mut uuids: Vec<u64> = Vec::new();
+    // The title a PERSON typed (`/title`, or a worktree name), kept apart from
+    // everything else because it outranks the generated one no matter where in
+    // the file the two records happen to sit.
+    let mut custom_title = String::new();
 
     let mut line: Vec<u8> = Vec::new();
     loop {
@@ -692,7 +696,7 @@ fn parse_session(path: &Path, size: u64) -> Option<Session> {
         if n == 0 {
             break;
         }
-        parse_line(&line, &mut s, &mut tools, &mut models, &mut files, &mut search, &mut uuids);
+        parse_line(&line, &mut s, &mut tools, &mut models, &mut files, &mut search, &mut uuids, &mut custom_title);
     }
     // Keep the K smallest distinct message-uuid hashes as this session's kin
     // sketch (position-independent, fixed-size; see KIN_SKETCH_K).
@@ -728,6 +732,11 @@ fn parse_session(path: &Path, size: u64) -> Option<Session> {
         .unwrap_or(&s.project_path)
         .to_string();
 
+    // A title someone typed wins over one a model generated, whichever record
+    // came last in the file: one is a decision, the other is a guess.
+    if !custom_title.trim().is_empty() {
+        s.title = custom_title.chars().take(80).collect();
+    }
     if s.title.is_empty() {
         let fp = s.first_prompt.trim();
         // A session resumed/compacted from another one opens with the same wrapper
@@ -776,6 +785,7 @@ fn parse_line(
     files: &mut HashSet<String>,
     search: &mut String,
     uuids: &mut Vec<u64>,
+    custom_title: &mut String,
 ) {
     let mut p = P::new(buf);
     if !p.obj_begin() {
@@ -835,6 +845,16 @@ fn parse_line(
                 if let Some(v) = p.take_string() {
                     if !v.is_empty() {
                         s.title = v;
+                    }
+                }
+            }
+            // `{"type":"custom-title","customTitle":"…"}` — the name a person
+            // gave the session. It was being ignored entirely, so a renamed
+            // session showed the generated title instead of the chosen one.
+            "customTitle" => {
+                if let Some(v) = p.take_string() {
+                    if !v.is_empty() {
+                        *custom_title = v;
                     }
                 }
             }
@@ -1154,5 +1174,243 @@ mod tests {
         line.clear();
         let n3 = read_line_capped(&mut r, &mut line).unwrap();
         assert_eq!(n3, 0, "EOF");
+    }
+
+    // -----------------------------------------------------------------------
+    // Il corpus.
+    //
+    // Righe SINTETICHE ma costruite sulla forma dei transcript veri: i tipi di
+    // record, l'ordine in cui arrivano, i campi che ci sono e quelli che
+    // mancano. Sintetiche e non copiate perche' un transcript reale contiene
+    // prompt, percorsi e nomi di progetto di chi lo ha scritto, e questo repo
+    // finisce in mano ad altri.
+    //
+    // Fino a ieri questo modulo aveva UN test, su 1.158 righe che leggono il
+    // formato di qualcun altro. Un campo letto male non si vede: diventa un
+    // numero plausibile e sbagliato che resta in un CSV per mesi.
+    // -----------------------------------------------------------------------
+
+    static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    fn tmp() -> PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "phosphor-scan-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    /// Scrive le righe date come transcript e lo fa leggere allo scanner vero.
+    fn scan_lines(lines: &[String]) -> Session {
+        let dir = tmp();
+        let f = dir.join("16b42417-0000-4000-8000-00000000000a.jsonl");
+        std::fs::write(&f, lines.join("\n") + "\n").unwrap();
+        let size = std::fs::metadata(&f).unwrap().len();
+        let s = parse_one(&f, size).expect("il transcript deve produrre una sessione");
+        std::fs::remove_dir_all(&dir).ok();
+        s
+    }
+
+    /// Una riga utente come la scrive Claude Code: `parentUuid` per primo, il
+    /// contesto (cwd, ramo, versione) ripetuto su OGNI riga.
+    fn user(uuid: &str, text: &str) -> String {
+        format!(
+            r#"{{"parentUuid":null,"isSidechain":false,"userType":"external","cwd":"C:\\Users\\dev\\proj","gitBranch":"main","version":"2.0.1","entrypoint":"cli","type":"user","uuid":"{uuid}","timestamp":"2026-09-10T08:00:00.000Z","message":{{"role":"user","content":"{text}"}}}}"#
+        )
+    }
+
+    /// Una riga assistente con uso di token, nella forma nuova: il totale delle
+    /// scritture di cache PIU' la ripartizione 5m/1h.
+    fn assistant(uuid: &str, model: &str, out: u64, cache_5m: u64, cache_1h: u64) -> String {
+        let total = cache_5m + cache_1h;
+        format!(
+            r#"{{"parentUuid":"p","isSidechain":false,"cwd":"C:\\Users\\dev\\proj","type":"assistant","uuid":"{uuid}","timestamp":"2026-09-10T08:01:00.000Z","message":{{"role":"assistant","model":"{model}","content":[{{"type":"text","text":"ok"}}],"usage":{{"input_tokens":100,"output_tokens":{out},"cache_read_input_tokens":2000,"cache_creation_input_tokens":{total},"cache_creation":{{"ephemeral_5m_input_tokens":{cache_5m},"ephemeral_1h_input_tokens":{cache_1h}}},"thinking_tokens":42,"service_tier":"standard"}}}}}}"#
+        )
+    }
+
+    #[test]
+    fn a_title_typed_by_a_person_beats_one_written_by_a_model() {
+        // Trovato costruendo queste fixture: 9 dei 22 transcript di questo PC
+        // portano un `custom-title` — il nome dato a mano alla sessione — e lo
+        // scanner non lo leggeva affatto, mostrando il titolo generato.
+        let s = scan_lines(&[
+            r#"{"type":"custom-title","customTitle":"il nome che ho scelto io","sessionId":"x"}"#.into(),
+            user("u1", "sistemiamo il parser"),
+            // L'aiTitle arriva DOPO, a sessione avviata: non deve vincere.
+            r#"{"type":"ai-title","aiTitle":"Sistemare il parser dei transcript","sessionId":"x"}"#.into(),
+            assistant("a1", "claude-opus-5", 10, 0, 0),
+        ]);
+        assert_eq!(s.title, "il nome che ho scelto io");
+
+        // Senza titolo scelto a mano vince quello generato, come prima.
+        let s = scan_lines(&[
+            user("u1", "sistemiamo il parser"),
+            r#"{"type":"ai-title","aiTitle":"Sistemare il parser","sessionId":"x"}"#.into(),
+        ]);
+        assert_eq!(s.title, "Sistemare il parser");
+
+        // Senza nessuno dei due si ripiega sul primo prompt.
+        let s = scan_lines(&[user("u1", "sistemiamo il parser")]);
+        assert_eq!(s.title, "sistemiamo il parser");
+    }
+
+    #[test]
+    fn the_wrapper_first_prompt_does_not_become_the_title() {
+        // Una sessione ripresa o compattata si apre con lo stesso messaggio
+        // involucro di tutte le altre: prenderlo come titolo renderebbe le
+        // sorelle indistinguibili in lista, che e' il caso in cui il titolo
+        // serve di piu'.
+        let s = scan_lines(&[
+            user("u1", "<local-command-caveat>attenzione</local-command-caveat>"),
+            r#"{"type":"summary","summary":"Ripulitura della cache incrementale","leafUuid":"u1"}"#.into(),
+        ]);
+        assert_eq!(s.title, "Ripulitura della cache incrementale");
+    }
+
+    #[test]
+    fn tokens_are_attributed_to_the_model_that_spent_them() {
+        // Una sessione che passa da Opus a Haiku non e' una sessione Opus: e'
+        // l'errore piu' grosso che questa stima abbia mai portato.
+        let s = scan_lines(&[
+            user("u1", "ciao"),
+            assistant("a1", "claude-opus-5", 1000, 0, 5000),
+            assistant("a2", "claude-haiku-4-5", 3000, 700, 0),
+        ]);
+        let get = |m: &str| s.usage.iter().find(|(n, _)| n == m).map(|(_, u)| *u);
+        let opus = get("claude-opus-5").expect("bucket opus");
+        let haiku = get("claude-haiku-4-5").expect("bucket haiku");
+        assert_eq!(opus[KIND_OUT], 1000);
+        assert_eq!(haiku[KIND_OUT], 3000);
+        // La ripartizione 5m/1h e' quella che decide il prezzo: la scrittura a
+        // un'ora costa il doppio dell'input, quella a cinque minuti 1.25x.
+        assert_eq!(opus[KIND_CACHE_1H], 5000, "1h su opus");
+        assert_eq!(opus[KIND_CACHE_5M], 0);
+        assert_eq!(haiku[KIND_CACHE_5M], 700, "5m su haiku");
+        assert_eq!(haiku[KIND_CACHE_1H], 0);
+        // I totali di sessione restano la somma dei bucket.
+        assert_eq!(s.output_tokens, 4000);
+        assert_eq!(s.cache_creation, 5700);
+        assert_eq!(s.cache_read, 4000, "2000 per riga assistente");
+        assert_eq!(s.models.len(), 2, "modelli: {:?}", s.models);
+    }
+
+    #[test]
+    fn a_cache_write_without_a_breakdown_is_priced_as_the_cheap_one() {
+        // I transcript vecchi hanno solo il totale. Contarlo come 1h
+        // gonfierebbe il conto di chi non puo' piu' verificarlo.
+        let line = format!(
+            r#"{{"type":"assistant","uuid":"a1","timestamp":"2026-09-10T08:01:00.000Z","message":{{"role":"assistant","model":"claude-sonnet-5","content":[],"usage":{{"input_tokens":10,"output_tokens":20,"cache_creation_input_tokens":9000}}}}}}"#
+        );
+        let s = scan_lines(&[user("u1", "ciao"), line]);
+        let u = s.usage.iter().find(|(n, _)| n == "claude-sonnet-5").expect("bucket").1;
+        assert_eq!(u[KIND_CACHE_5M], 9000, "senza ripartizione si sceglie la tariffa bassa");
+        assert_eq!(u[KIND_CACHE_1H], 0);
+    }
+
+    #[test]
+    fn the_junk_records_around_the_conversation_do_not_become_messages() {
+        // Un transcript vero e' in gran parte righe di servizio: modalita',
+        // permessi, code, istantanee di file. Contarle come messaggi
+        // gonfierebbe ogni sessione della lista.
+        let s = scan_lines(&[
+            r#"{"type":"mode","mode":"default","sessionId":"x"}"#.into(),
+            r#"{"type":"permission-mode","permissionMode":"acceptEdits","sessionId":"x"}"#.into(),
+            r#"{"type":"queue-operation","operation":"enqueue","sessionId":"x"}"#.into(),
+            r#"{"type":"bridge-session","sessionId":"x"}"#.into(),
+            user("u1", "prima domanda"),
+            assistant("a1", "claude-opus-5", 5, 0, 0),
+            r#"{"type":"file-history-snapshot","snapshot":{"trackedFileBackups":{"C:\\Users\\dev\\proj\\src\\main.rs":{}}}}"#.into(),
+            user("u2", "seconda domanda"),
+        ]);
+        assert_eq!(s.message_count, 3, "due utente e uno assistente, nient'altro");
+        assert!(s.files.iter().any(|f| f.ends_with("main.rs")), "file: {:?}", s.files);
+        assert_eq!(s.first_prompt.trim(), "prima domanda");
+        assert!(s.last_prompt.contains("seconda") || s.search_text.contains("seconda"));
+    }
+
+    #[test]
+    fn a_truncated_last_line_does_not_lose_the_session() {
+        // Succede davvero: il file e' aperto in scrittura mentre lo leggiamo.
+        // L'ultima riga e' mezza. Perdere l'intera sessione per questo
+        // significherebbe che le sessioni VIVE — le uniche che interessano
+        // davvero — sono quelle che spariscono dalla lista.
+        let s = scan_lines(&[
+            user("u1", "domanda"),
+            assistant("a1", "claude-opus-5", 7, 0, 0),
+            r#"{"type":"assistant","uuid":"a2","message":{"role":"assistant","conten"#.into(),
+        ]);
+        // Il conteggio arriva a 3: il record mozzo porta il suo `role` PRIMA
+        // del taglio, quindi conta come messaggio — ed e' giusto cosi', quel
+        // messaggio lo si sta scrivendo davvero. Alla scansione dopo la riga
+        // sara' intera e continuera' a contare una volta sola.
+        assert_eq!(s.message_count, 3);
+        assert_eq!(s.output_tokens, 7, "i token della riga intera non si perdono");
+        assert_eq!(s.project_name, "proj");
+        assert_eq!(s.title, "domanda", "il titolo regge");
+    }
+
+    #[test]
+    fn a_sub_agent_transcript_is_marked_as_one() {
+        // I sotto-agenti hanno un transcript tutto loro: se finissero in lista
+        // come sessioni normali, il conto delle sessioni sarebbe il doppio di
+        // quelle che una persona ricorda di aver aperto.
+        let s = scan_lines(&[
+            r#"{"parentUuid":null,"isSidechain":true,"cwd":"C:\\Users\\dev\\proj","type":"user","uuid":"u1","timestamp":"2026-09-10T08:00:00.000Z","message":{"role":"user","content":"cerca nei file"}}"#.into(),
+            assistant("a1", "claude-haiku-4-5", 9, 0, 0),
+        ]);
+        assert!(s.is_sidechain, "e' un sotto-agente");
+    }
+
+    #[test]
+    fn tools_and_corrections_are_counted_from_the_conversation() {
+        let s = scan_lines(&[
+            user("u1", "leggi il file"),
+            r#"{"type":"assistant","uuid":"a1","timestamp":"2026-09-10T08:01:00.000Z","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"tool_use","name":"Read","input":{}},{"type":"tool_use","name":"Read","input":{}},{"type":"tool_use","name":"Edit","input":{}}],"usage":{"input_tokens":1,"output_tokens":1}}}"#.into(),
+            user("u2", "no, non e' quello che ho chiesto"),
+        ]);
+        let tool = |n: &str| s.tools.iter().find(|(t, _)| t == n).map(|(_, c)| *c).unwrap_or(0);
+        assert_eq!(tool("Read"), 2, "due letture, non una");
+        assert_eq!(tool("Edit"), 1);
+        assert_eq!(s.corrections, 1, "«no, non e' quello» e' una correzione");
+    }
+
+    #[test]
+    fn context_fields_come_from_the_lines_that_carry_them() {
+        let s = scan_lines(&[
+            user("u1", "ciao"),
+            assistant("a1", "claude-opus-5", 1, 0, 0),
+        ]);
+        assert_eq!(s.project_path, r"C:\Users\dev\proj");
+        assert_eq!(s.project_name, "proj");
+        assert_eq!(s.git_branch, "main");
+        assert_eq!(s.version, "2.0.1");
+        assert_eq!(s.entrypoint, "cli");
+        assert_eq!(s.created, "2026-09-10T08:00:00.000Z", "il PRIMO timestamp");
+        assert_eq!(s.modified, "2026-09-10T08:01:00.000Z", "l'ULTIMO timestamp");
+        assert!(!s.kin_sketch.is_empty(), "le uuid dei messaggi fanno da impronta");
+    }
+
+    #[test]
+    fn an_empty_or_unreadable_file_is_still_a_session_with_nothing_in_it() {
+        // Verrebbe da dire che un file vuoto non e' una sessione. E' il
+        // contrario: `clean --delete-empty` cerca proprio le righe con <= 1
+        // messaggio e zero token, e non puo' proporre di cancellare quello che
+        // lo scanner ha gia' buttato via. Questo test tiene fermo quel patto.
+        let dir = tmp();
+        let empty = dir.join("16b42417-0000-4000-8000-00000000000b.jsonl");
+        std::fs::write(&empty, b"").unwrap();
+        let s = parse_one(&empty, 0).expect("resta elencabile");
+        assert_eq!(s.message_count, 0);
+        assert_eq!(s.input_tokens + s.output_tokens, 0);
+        assert_eq!(s.title, "(senza titolo)");
+
+        let junk = dir.join("16b42417-0000-4000-8000-00000000000c.jsonl");
+        std::fs::write(&junk, b"non sono json\naltra riga\n").unwrap();
+        let size = std::fs::metadata(&junk).unwrap().len();
+        let s = parse_one(&junk, size).expect("nemmeno la spazzatura fa saltare lo scanner");
+        assert_eq!(s.message_count, 0, "righe illeggibili non sono messaggi");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
