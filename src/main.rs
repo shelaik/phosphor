@@ -85,6 +85,7 @@ COMANDI
   watch             monitor live: notifica i cambi di stato (Ctrl+C esce)
   clean             uso disco e sessioni vuote (non elimina senza conferma)
   archived          elenca i progetti archiviati (vedi --archive-project)
+  icon [file]      rigenera l'icona dell'app (manutenzione: e' gia' nell'exe)
   retention [giorni] mostra (e alza) ogni quanto Claude Code cancella i suoi
                     transcript: di default dopo 30 giorni, senza cestino
   vault [on|off]    magazzino anti-cancellazione: hard link dei transcript in
@@ -516,6 +517,33 @@ fn do_retention_cmd(base: &std::path::Path, arg: Option<&str>) {
     }
 }
 
+/// `phosphor icon [--out <file.ico>]` — regenerate the application icon.
+///
+/// A maintenance command, not an everyday one: the icon is already embedded in
+/// this executable. It exists so the `.ico` in the repo stays a BUILD ARTIFACT
+/// with source behind it (see `phosphor::icon`) rather than an opaque binary
+/// nobody can reproduce or review in a diff.
+fn do_icon_cmd(arg: Option<&str>) {
+    let path = std::path::PathBuf::from(arg.unwrap_or("assets/phosphor.ico"));
+    if let Some(d) = path.parent() {
+        let _ = std::fs::create_dir_all(d);
+    }
+    let data = phosphor::icon::ico();
+    match std::fs::write(&path, &data) {
+        Ok(()) => {
+            println!("✓ icona scritta: {}  ({:.1} KB)", path.display(), data.len() as f64 / 1024.0);
+            println!(
+                "  {} dimensioni: {}",
+                phosphor::icon::SIZES.len(),
+                phosphor::icon::SIZES.map(|s| s.to_string()).join(", ")
+            );
+            println!();
+            println!("Per vederla nell'exe serve ricompilare: build.rs la incorpora come");
+            println!("risorsa Windows quando rc.exe del Windows SDK e' disponibile.");
+        }
+        Err(e) => eprintln!("✗ scrittura fallita: {e}"),
+    }
+}
 /// `phosphor vault [status|on|off|restore <id>]` — the hard-link vault that
 /// keeps transcripts alive after an agent (or a disk cleaner) deletes them.
 /// See `phosphor::vault`.
@@ -1387,6 +1415,7 @@ fn main() {
     let mut archived_mode = false;
     let mut vault_action: Option<(String, Option<String>)> = None;
     let mut retention_action: Option<Option<String>> = None;
+    let mut icon_out: Option<Option<String>> = None;
     let mut export_mode = false;
     let mut import_path: Option<String> = None;
     let mut import_remaps: Vec<(String, String)> = Vec::new();
@@ -1443,6 +1472,13 @@ fn main() {
                 }
             }
             "archived" => archived_mode = true,
+            "icon" | "icona" => {
+                let n = args.get(i + 1).cloned().filter(|x| !x.starts_with('-'));
+                if n.is_some() {
+                    i += 1;
+                }
+                icon_out = Some(n);
+            }
             "retention" | "retenzione" => {
                 let n = args.get(i + 1).cloned().filter(|x| x.parse::<u64>().is_ok());
                 if n.is_some() {
@@ -1609,6 +1645,10 @@ fn main() {
     }
     if let Some(arg) = &retention_action {
         do_retention_cmd(&base, arg.as_deref());
+        return;
+    }
+    if let Some(out) = &icon_out {
+        do_icon_cmd(out.as_deref());
         return;
     }
     if let Some(name) = &unarchive_project {

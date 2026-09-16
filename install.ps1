@@ -73,7 +73,11 @@ $ws = New-Object -ComObject WScript.Shell
 $sc = $ws.CreateShortcut($lnk)
 $sc.TargetPath = Join-Path $dest 'phosphor.exe'
 $sc.WorkingDirectory = $dest
-$sc.Description = 'Phosphor — scanner delle sessioni di Claude Code'
+$sc.Description = 'Phosphor — scanner delle sessioni di Claude Code e Codex'
+# L'icona e' dentro l'exe (build.rs la incorpora): puntandola esplicitamente il
+# collegamento la mostra subito, senza aspettare che la cache icone di Explorer
+# si accorga del binario nuovo.
+$sc.IconLocation = "$(Join-Path $dest 'phosphor.exe'),0"
 $sc.Save()
 Write-Host "  creato collegamento sul Desktop: Phosphor.lnk"
 

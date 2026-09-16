@@ -182,36 +182,43 @@ impl Canvas {
 
     /// Encode as a PNG byte stream.
     pub fn to_png(&self) -> Vec<u8> {
-        let stride = self.w * 3;
-        // PNG filtering, per scanline. `Up` turns an identical row into a run of
-        // zeroes, which is most of a card made of flat panels — and a zero run
-        // is exactly what the matcher below collapses best.
-        let mut raw = Vec::with_capacity((stride + 1) * self.h);
-        for y in 0..self.h {
-            let row = &self.px[y * stride..(y + 1) * stride];
-            if y == 0 {
-                raw.push(0); // None: nothing above to subtract
-                raw.extend_from_slice(row);
-            } else {
-                raw.push(2); // Up
-                let prev = &self.px[(y - 1) * stride..y * stride];
-                for i in 0..stride {
-                    raw.push(row[i].wrapping_sub(prev[i]));
-                }
+        encode(self.w, self.h, 3, &self.px)
+    }
+}
+
+/// Encode raw 8-bit samples as a PNG. `channels` is 3 (RGB) or 4 (RGBA) — the
+/// icon needs transparent corners, the Wrapped card does not.
+pub fn encode(w: usize, h: usize, channels: usize, px: &[u8]) -> Vec<u8> {
+    let stride = w * channels;
+    // PNG filtering, per scanline. `Up` turns an identical row into a run of
+    // zeroes, which is most of a flat-coloured image — and a zero run is
+    // exactly what the matcher in `deflate_fixed` collapses best.
+    let mut raw = Vec::with_capacity((stride + 1) * h);
+    for y in 0..h {
+        let row = &px[y * stride..(y + 1) * stride];
+        if y == 0 {
+            raw.push(0); // None: nothing above to subtract
+            raw.extend_from_slice(row);
+        } else {
+            raw.push(2); // Up
+            let prev = &px[(y - 1) * stride..y * stride];
+            for i in 0..stride {
+                raw.push(row[i].wrapping_sub(prev[i]));
             }
         }
-
-        let mut out = Vec::with_capacity(raw.len() / 8 + 1024);
-        out.extend_from_slice(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
-        let mut ihdr = Vec::with_capacity(13);
-        ihdr.extend_from_slice(&(self.w as u32).to_be_bytes());
-        ihdr.extend_from_slice(&(self.h as u32).to_be_bytes());
-        ihdr.extend_from_slice(&[8, 2, 0, 0, 0]); // 8 bit, truecolour RGB
-        chunk(&mut out, b"IHDR", &ihdr);
-        chunk(&mut out, b"IDAT", &zlib(&raw));
-        chunk(&mut out, b"IEND", &[]);
-        out
     }
+
+    let mut out = Vec::with_capacity(raw.len() / 8 + 1024);
+    out.extend_from_slice(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]);
+    let mut ihdr = Vec::with_capacity(13);
+    ihdr.extend_from_slice(&(w as u32).to_be_bytes());
+    ihdr.extend_from_slice(&(h as u32).to_be_bytes());
+    // colour type 2 = truecolour, 6 = truecolour with alpha
+    ihdr.extend_from_slice(&[8, if channels == 4 { 6 } else { 2 }, 0, 0, 0]);
+    chunk(&mut out, b"IHDR", &ihdr);
+    chunk(&mut out, b"IDAT", &zlib(&raw));
+    chunk(&mut out, b"IEND", &[]);
+    out
 }
 
 fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {

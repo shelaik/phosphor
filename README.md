@@ -82,6 +82,7 @@ on your PATH. To compile from source, see [Build](#build-from-source).
 | `sync set <dir>` | configure a local git repo (private) for bundle sync |
 | `sync push` / `pull` | send this PC's bundle / import other PCs' bundles via git |
 | `retention [<days>]` | show — and raise — how long Claude Code keeps its own transcripts (30 days by default) |
+| `icon [file]` | regenerate the app icon (maintenance: it is already embedded in the binary) |
 | `vault [on\|off]` | hard-link vault that keeps transcripts alive after deletion (0 extra bytes); no args = status; `vault restore <id>` puts one back |
 
 ## Options
