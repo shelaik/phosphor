@@ -11,6 +11,7 @@
 //!   phosphor --web --port 9000   # browser dashboard on a custom port
 //!   phosphor --dir <path>    # point at a different .claude directory
 
+use phosphor::t;
 use phosphor::scan::Session;
 use phosphor::server::State;
 use phosphor::{cache, config, live, rescan, server, tui};
@@ -35,7 +36,13 @@ fn fmt_tokens(n: u64) -> String {
 fn print_table(sessions: &[Session]) {
     println!(
         "{:<3} {:<20} {:<34} {:>5} {:>7} {:<16} {}",
-        "", "PROGETTO", "TITOLO", "MSG", "TOKEN", "ULTIMA ATTIVITÀ", "STATO"
+        "",
+        t!("PROGETTO", "PROJECT"),
+        t!("TITOLO", "TITLE"),
+        "MSG",
+        t!("TOKEN", "TOKENS"),
+        t!("ULTIMA ATTIVITÀ", "LAST ACTIVITY"),
+        t!("STATO", "STATE")
     );
     for s in sessions {
         let dot = match s.live.as_str() {
@@ -62,7 +69,17 @@ fn print_table(sessions: &[Session]) {
     );
 }
 
+/// The terminal help, in the language in use.
 fn help() {
+    if phosphor::lang::is_en() {
+        help_en()
+    } else {
+        help_it()
+    }
+}
+
+/// L'aiuto da terminale in italiano.
+fn help_it() {
     println!(
 "phosphor — scanner delle sessioni di Claude Code e Codex (sola lettura)
 
@@ -172,7 +189,7 @@ PORTARE UNA SESSIONE SU UN ALTRO PC (passo per passo)
 
 FILE SCRITTI (solo dentro la cartella .claude e, per export, sul Desktop)
   phosphor.json               la tua configurazione (tema, prezzi, budget…)
-  .phosphor-cache.v2.jsonl    cache di scansione, rigenerabile (riscritta a ogni scan)
+  .phosphor-cache.<chiave>.jsonl  cache di scansione, rigenerabile (riscritta a ogni scan)
   Desktop/phosphor-export-*   CSV/JSON dell'export vista: data nel nome, mai sovrascrive
   Desktop/phosphor-sessioni-* bundle .phx di export-all: data nel nome, mai sovrascrive
   Desktop/phosphor-wrapped-*  card SVG di wrapped: mai sovrascrive (nome con data se esiste)
@@ -184,6 +201,140 @@ non modifica e non elimina nulla, e chiede sempre conferma prima di scrivere.
 L'unica azione che può cancellare file è `clean --delete-empty`, e solo file
 .jsonl vuoti dentro <dir>/projects, sempre dopo conferma esplicita digitata.
 La voce «Riprendi» apre un terminale e lancia `claude --resume`, previa conferma."
+    );
+}
+
+/// The terminal help in English.
+///
+/// A second block rather than a pair per line, for the same reason as the TUI
+/// panel: this is a page someone reads top to bottom, and a page is revised as
+/// a page. The commands and flags in the left column are identical in both, so
+/// the two cannot drift on anything that matters.
+fn help_en() {
+    println!(
+"phosphor — a read-only scanner for your Claude Code and Codex sessions
+
+USAGE
+  phosphor [command] [options]
+
+COMMANDS
+  (none)            native full-screen app in the terminal (TUI)
+  --pixel           the same, with pixel graphics (toggle with 'p')
+  --web             browser dashboard at http://127.0.0.1:8787
+  ls                print a table of the sessions and exit
+  json              print the sessions as JSON (scriptable) and exit
+  find <text>       search prompts/files/tools across every session
+  cost              spend 24h/7d/30d, budget and top projects
+                    (--explain writes out the whole arithmetic)
+  wrapped           make a shareable \"Wrapped\" card (PNG + SVG): tokens, cost,
+                    energy/water, top projects — 100% offline, on the Desktop
+  limits            plan (e.g. Max 20x) and limit-window reset
+  mcp               MCP server (stdio): gives Claude recall over your past
+                    sessions (search_sessions · read_session · search_content)
+  watch             live monitor: reports state changes (Ctrl+C quits)
+  clean             disk usage and empty sessions (never deletes unasked)
+  archived          list archived projects (see --archive-project)
+  icon [file]       regenerate the app icon (maintenance: it is already in the exe)
+  retention [days]  show — and raise — how often Claude Code deletes its own
+                    transcripts: 30 days by default, with no recycle bin
+  vault [on|off]    anti-deletion store: hard links of the transcripts in
+                    ~/.claude/phosphor-vault (0 extra bytes). With no argument
+                    it shows the status;  vault restore <id>  puts back a
+                    session the agent has deleted
+  export-all        pack the sessions (transcripts + subfolders) into ONE
+                    portable .phx file, to move them to another PC
+  import <file.phx> add a bundle's sessions to this PC (never overwrites,
+                    ALWAYS ASKS FIRST)
+  import <f.phx> --remap \"<orig>=<local>\"   remap a project onto THIS PC's
+                    path: resumable with 'claude --resume' from the local
+                    folder (repeatable; the remap is saved for the resume)
+  remote add <alias>  register another of your PCs for the fleet (the ssh ALIAS
+                    only: host, user and keys stay in ~/.ssh/config + ssh-agent)
+  remote rm|list    remove / list the configured remote PCs
+  fleet             query the remote PCs over ssh and summarise their sessions
+                    (in the TUI: key F merges them into the list, [alias] beside)
+  resume-here <id>  resume a session IN THE CURRENT terminal (no new window) —
+                    this is what the fleet runs over ssh on the other PC
+  sync set <dir>    configure a (private) git repo cloned locally for sync
+  sync push         pack the sessions into a .phx and send it to the repo (git)
+  sync pull         update from the repo and import the other PCs' bundles (asks)
+  sync status       show repo, encryption, git state and the bundles present
+                    (encryption optional: set syncEncrypt to an age recipient
+                     in phosphor.json; syncIdentity = the key to decrypt)
+
+OPTIONS
+  --port <n>        web dashboard port (default 8787)
+  --watch <sec>     live re-scan interval (default 5)
+  --no-open         with --web: do not open the browser automatically
+  --running         with ls/json/export-all: live sessions only
+  --project <txt>   with ls/json/export-all: filter by project name
+  --explain         with cost: write out the arithmetic behind every figure
+  --window <w>      with wrapped: 7g | 30g | anno | tutto  (default: anno)
+  --with-projects   with wrapped: show the project names (default: anonymous)
+  --no-cost         with wrapped: hide the cost line in $
+  --out <file>      with export-all: path of the .phx file to create
+  --dir <path>      use a different .claude folder
+  --delete-empty    with clean: delete empty sessions (ALWAYS ASKS FIRST)
+  --delete-project <name>  PERMANENTLY delete every transcript of a project
+                    (double confirmation: re-type the name; offers a .phx backup)
+  --archive-project <name>  archive a project (moves it to archived/, it leaves
+                    the list but is NOT destroyed — reversible)
+  --unarchive-project <folder>  restore an archived project
+  -V, --version     print the precise version (vX.Y.Z · git commit · date) and exit
+  -h, --help        print this help
+
+SHORTCUTS (in the TUI app; press ? or F1 for the full, clickable help)
+  ↑↓ / wheel    move the selection      ⏎ / click   open the session detail
+  /             full-text search        f           state filter
+  o / s         sort column / dir       a           sub-agents and workflows
+  r             resume (asks first)     e           export CSV+JSON (asks)
+  x             export a .phx bundle    i           import a bundle (asks)
+  t / T         theme forward/back      p           pixel graphics on/off
+  m             chart metric            R           rescan now
+  L             English ⇄ italiano      🖰           mouse-only mode
+  Tab / 1 2 3   switch view             q / Ctrl+C  quit
+
+MOVING A SESSION TO ANOTHER PC (step by step)
+  It works the same with the SAME Claude account or a DIFFERENT one: a .phx
+  holds no credentials and the import only ever touches local files.
+
+  On the PC you are leaving:
+    1) phosphor export-all          every session → Desktop/phosphor-sessioni-*.phx
+                                    (or --project <name> for just one,
+                                     --out <file.phx> to choose where it lands)
+    2) copy that .phx to the other PC (USB stick, email, whatever)
+  On the destination PC:
+    3) phosphor import <file.phx>   shows what it will add and ASKS FIRST;
+                                    it overwrites nothing
+    4) phosphor                     the imported sessions are now in the list
+
+  To RESUME the conversation (not merely look at it):
+    • that PC needs Claude Code installed and a valid login — a DIFFERENT
+      account is fine: the transcript is a local file; the usage will go to
+      whichever account is logged in there.
+    • you need the project's working folder, because `claude --resume` looks for
+      the session in the folder matching the project's path:
+        - SAME absolute path as before → select the session in phosphor and
+          press `r` (Resume), or from that folder:  claude --resume <id>
+        - DIFFERENT path (user/drive)  → bring the project files over (git, say)
+          and from the project folder:  claude --resume <id> --fork-session
+    • the project's CODE is NOT inside the session: move it separately (git or a
+      copy) if you want the resumed conversation to work on the right files.
+
+FILES WRITTEN (only inside the .claude folder and, for exports, on the Desktop)
+  phosphor.json               your configuration (theme, prices, budget, language…)
+  .phosphor-cache.<key>.jsonl scan cache, regenerable (rewritten on every scan)
+  Desktop/phosphor-export-*   CSV/JSON of the exported view: dated name, never overwrites
+  Desktop/phosphor-sessioni-* .phx bundle from export-all: dated name, never overwrites
+  Desktop/phosphor-wrapped-*  the wrapped card: never overwrites (dated name if one exists)
+
+Session transcripts are NEVER modified, and nothing is ever sent over the network.
+`export-all` only creates a new .phx file (it touches nothing that exists).
+`import` ONLY ADDS the missing files inside <dir>/projects: it does not overwrite,
+modify or remove anything, and it always asks before writing.
+The only action that can delete files is `clean --delete-empty`, and only empty
+.jsonl files inside <dir>/projects, always after an explicitly typed confirmation.
+The \"Resume\" action opens a terminal and runs `claude --resume`, after asking."
     );
 }
 
@@ -250,23 +401,33 @@ fn print_cost(base: &std::path::Path, sessions: &[Session], cfg: &config::Config
     // The window totals mix agents when both are installed, so name them: the
     // Claude and the Codex halves are priced off different lists.
     let cx = sessions.iter().filter(|s| s.is_codex()).count();
+    let agents = if cx > 0 { "Claude Code + Codex" } else { "Claude Code" };
+    let asof = if cfg.prices_as_of.trim().is_empty() { "?" } else { cfg.prices_as_of.trim() };
     println!(
-        "Spesa stimata ({}, listino del {}):",
-        if cx > 0 { "Claude Code + Codex" } else { "Claude Code" },
-        if cfg.prices_as_of.trim().is_empty() { "?" } else { cfg.prices_as_of.trim() }
+        "{}",
+        t!(
+            format!("Spesa stimata ({agents}, listino del {asof}):"),
+            format!("Estimated spend ({agents}, price list of {asof}):"),
+        )
     );
-    println!("  ultime 5h  : {}   (finestra limiti breve — stima locale)", usd(win(5 * 3_600_000)));
-    println!("  ultime 24h : {}", usd(win(d)));
-    println!("  ultimi 7g  : {}", usd(win(7 * d)));
+    if phosphor::lang::is_en() { println!("  last 5h    : {}   (short limit window — local estimate)", usd(win(5 * 3_600_000))); } else { println!("  ultime 5h  : {}   (finestra limiti breve — stima locale)", usd(win(5 * 3_600_000))); }
+    if phosphor::lang::is_en() { println!("  last 24h   : {}", usd(win(d))); } else { println!("  ultime 24h : {}", usd(win(d))); }
+    if phosphor::lang::is_en() { println!("  last 7d    : {}", usd(win(7 * d))); } else { println!("  ultimi 7g  : {}", usd(win(7 * d))); }
     let m = win(30 * d);
     if budget > 0.0 {
         let pct = (m / budget * 100.0).round() as u64;
         let flag = if m > budget { "   ⚠ SOPRA BUDGET" } else { "" };
-        println!("  ultimi 30g : {}  ({}% di {} budget){}", usd(m), pct, usd(budget), flag);
+        if phosphor::lang::is_en() { println!("  last 30d   : {}  ({}% of {} budget){}", usd(m), pct, usd(budget), flag); } else { println!("  ultimi 30g : {}  ({}% di {} budget){}", usd(m), pct, usd(budget), flag); }
     } else {
-        println!("  ultimi 30g : {}   (imposta \"budget\" in ~/.claude/phosphor.json per gli alert)", usd(m));
+        println!(
+            "{}",
+            t!(
+                format!("  ultimi 30g : {}   (imposta \"budget\" in ~/.claude/phosphor.json per gli alert)", usd(m)),
+                format!("  last 30d   : {}   (set \"budget\" in ~/.claude/phosphor.json for alerts)", usd(m)),
+            )
+        );
     }
-    println!("  totale     : {}", usd(sessions.iter().map(|s| config::cost(s, prices)).sum::<f64>()));
+    if phosphor::lang::is_en() { println!("  total      : {}", usd(sessions.iter().map(|s| config::cost(s, prices)).sum::<f64>())); } else { println!("  totale     : {}", usd(sessions.iter().map(|s| config::cost(s, prices)).sum::<f64>())); }
     // Un costo calcolato su prezzi vecchi e' indistinguibile da uno giusto: e'
     // l'unico modo in cui questi numeri possono mentire senza che si veda.
     if let Some(w) = config::prices_warning(&cfg.prices_as_of, &config::today_iso()) {
@@ -285,12 +446,18 @@ fn print_cost(base: &std::path::Path, sessions: &[Session], cfg: &config::Config
     let (etot, wtot) = sessions.iter()
         .map(|s| config::footprint(s, cfg.energy_wh_per_output_token, cfg.water_l_per_kwh))
         .fold((0.0, 0.0), |(e, wt), (de, dw)| (e + de, wt + dw));
-    println!("\nFootprint stimato (energia · acqua on-site) — STIMA, ±ordine di grandezza:");
-    println!("  ultime 24h : {}  ·  {}", fmt_wh(e24), fmt_ml(w24));
-    println!("  ultimi 7g  : {}  ·  {}", fmt_wh(e7), fmt_ml(w7));
-    println!("  ultimi 30g : {}  ·  {}", fmt_wh(e30), fmt_ml(w30));
-    println!("  totale     : {}  ·  {}", fmt_wh(etot), fmt_ml(wtot));
-    println!("  (acqua = solo raffreddamento on-site; col footprint completo dell'energia può essere ~100x)");
+    println!(
+        "\n{}",
+        t!(
+            "Footprint stimato (energia · acqua on-site) — STIMA, ±ordine di grandezza:",
+            "Estimated footprint (energy · on-site water) — ESTIMATE, ±order of magnitude:",
+        )
+    );
+    if phosphor::lang::is_en() { println!("  last 24h   : {}  ·  {}", fmt_wh(e24), fmt_ml(w24)); } else { println!("  ultime 24h : {}  ·  {}", fmt_wh(e24), fmt_ml(w24)); }
+    if phosphor::lang::is_en() { println!("  last 7d    : {}  ·  {}", fmt_wh(e7), fmt_ml(w7)); } else { println!("  ultimi 7g  : {}  ·  {}", fmt_wh(e7), fmt_ml(w7)); }
+    if phosphor::lang::is_en() { println!("  last 30d   : {}  ·  {}", fmt_wh(e30), fmt_ml(w30)); } else { println!("  ultimi 30g : {}  ·  {}", fmt_wh(e30), fmt_ml(w30)); }
+    if phosphor::lang::is_en() { println!("  total      : {}  ·  {}", fmt_wh(etot), fmt_ml(wtot)); } else { println!("  totale     : {}  ·  {}", fmt_wh(etot), fmt_ml(wtot)); }
+    if phosphor::lang::is_en() { println!("  (water = on-site cooling only; with the full energy footprint it can be ~100x)"); } else { println!("  (acqua = solo raffreddamento on-site; col footprint completo dell'energia può essere ~100x)"); }
 
     let mut by: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
     for s in sessions {
@@ -298,7 +465,7 @@ fn print_cost(base: &std::path::Path, sessions: &[Session], cfg: &config::Config
     }
     let mut v: Vec<(String, f64)> = by.into_iter().collect();
     v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    println!("\nTop progetti per costo:");
+    println!("\n{}", t!("Top progetti per costo:", "Top projects by cost:"));
     for (p, c) in v.into_iter().take(8) {
         println!("  {:<24} {}", crop(&p, 24), usd(c));
     }
@@ -311,10 +478,10 @@ fn print_cost(base: &std::path::Path, sessions: &[Session], cfg: &config::Config
 fn plan_line(base: &std::path::Path) -> Option<String> {
     use chrono::TimeZone;
     let p = phosphor::plan::load(base)?;
-    let mut s = String::from("Piano ");
+    let mut s = String::from(t!("Piano ", "Plan "));
     s.push_str(if p.tier_label.is_empty() { "?" } else { &p.tier_label });
     if p.extra_usage {
-        s.push_str(" (extra usage attivo)");
+        s.push_str(t!(" (extra usage attivo)", " (extra usage on)"));
     }
     if let Some(end) = p.limits_end_ms {
         let abs = chrono::Local
@@ -322,7 +489,8 @@ fn plan_line(base: &std::path::Path) -> Option<String> {
             .single()
             .map(|d| d.format("%d/%m %H:%M").to_string())
             .unwrap_or_default();
-        s.push_str(&format!(" · reset limiti {} ({})", phosphor::plan::reset_in(end, now_ms()), abs));
+        let r = phosphor::plan::reset_in(end, now_ms());
+        s.push_str(&t!(format!(" · reset limiti {r} ({abs})"), format!(" · limits reset {r} ({abs})")));
     }
     Some(s)
 }
@@ -334,8 +502,13 @@ fn print_limits(base: &std::path::Path) {
         Some(line) => {
             println!("{line}");
             println!(
-                "\nNota: le percentuali ufficiali 5h/settimanali NON sono salvate in locale\n\
-                 (Claude le riceve a runtime). Qui mostriamo solo piano e reset della finestra."
+                "\n{}",
+                t!(
+                    "Nota: le percentuali ufficiali 5h/settimanali NON sono salvate in locale\n\
+                     (Claude le riceve a runtime). Qui mostriamo solo piano e reset della finestra.",
+                    "Note: the official 5h/weekly percentages are NOT stored locally\n\
+                     (Claude receives them at runtime). Only the plan and the window reset are shown.",
+                )
             );
         }
         None => {
@@ -358,8 +531,15 @@ fn do_clean(base: &std::path::Path, sessions: &[Session], delete_empty: bool) {
     let mut v: Vec<(String, (u64, u64))> = by.into_iter().collect();
     v.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
     let total: u64 = sessions.iter().map(|s| s.size).sum();
-    println!("Uso disco transcript: {:.1} MB su {} sessioni\n", total as f64 / 1048576.0, sessions.len());
-    println!("Top progetti per spazio:");
+    let (mb, nsess) = (total as f64 / 1048576.0, sessions.len());
+    println!(
+        "{}\n",
+        t!(
+            format!("Uso disco transcript: {mb:.1} MB su {nsess} sessioni"),
+            format!("Transcript disk usage: {mb:.1} MB across {nsess} sessions"),
+        )
+    );
+    println!("{}", t!("Top progetti per spazio:", "Top projects by size:"));
     for (p, (b, n)) in v.iter().take(10) {
         println!("  {:<24} {:>8.1} MB  ({} sess)", crop(p, 24), *b as f64 / 1048576.0, n);
     }
@@ -377,10 +557,23 @@ fn do_clean(base: &std::path::Path, sessions: &[Session], delete_empty: bool) {
         })
         .collect();
     let esize: u64 = empty.iter().map(|s| s.size).sum();
-    println!("\nSessioni vuote (≤1 messaggio e 0 token, escluse le live): {} ({:.1} MB)", empty.len(), esize as f64 / 1048576.0);
+    let (ne, emb) = (empty.len(), esize as f64 / 1048576.0);
+    println!(
+        "\n{}",
+        t!(
+            format!("Sessioni vuote (≤1 messaggio e 0 token, escluse le live): {ne} ({emb:.1} MB)"),
+            format!("Empty sessions (≤1 message and 0 tokens, live ones excluded): {ne} ({emb:.1} MB)"),
+        )
+    );
     if !delete_empty {
-        println!("\nNiente viene eliminato senza la tua conferma. Per ripulire le sessioni vuote:");
-        println!("  phosphor clean --delete-empty        → mostra l'elenco e CHIEDE SEMPRE CONFERMA");
+        println!(
+            "\n{}",
+            t!(
+                "Niente viene eliminato senza la tua conferma. Per ripulire le sessioni vuote:",
+                "Nothing is deleted without your say-so. To clear the empty sessions:",
+            )
+        );
+        if phosphor::lang::is_en() { println!("  phosphor clean --delete-empty        → lists them and ALWAYS ASKS FIRST"); } else { println!("  phosphor clean --delete-empty        → mostra l'elenco e CHIEDE SEMPRE CONFERMA"); }
         return;
     }
     if empty.is_empty() {
@@ -456,8 +649,8 @@ fn do_delete_project(base: &std::path::Path, sessions: &[Session], name: &str) {
     let live = subset.iter().filter(|s| s.live == "running" || s.live == "idle").count();
 
     println!("\nProgetto «{name}»");
-    println!("  cartella:  {}", dir.display());
-    println!("  sessioni:  {}  ({})", subset.len(), mb(bytes));
+    if phosphor::lang::is_en() { println!("  folder:    {}", dir.display()); } else { println!("  cartella:  {}", dir.display()); }
+    if phosphor::lang::is_en() { println!("  sessions:  {}  ({})", subset.len(), mb(bytes)); } else { println!("  sessioni:  {}  ({})", subset.len(), mb(bytes)); }
     if live > 0 {
         println!("\n⚠  {live} sessione/i LIVE in questo progetto: chiudile prima di cancellare. Annullato.");
         return;
@@ -491,19 +684,19 @@ fn do_retention_cmd(base: &std::path::Path, arg: Option<&str>) {
     match arg {
         None => {
             println!("{}", ret::summary(base));
-            println!("  file       : {}", ret::settings_path(base).display());
-            println!("  in vigore  : {} giorni", ret::effective(base));
+            if phosphor::lang::is_en() { println!("  files      : {}", ret::settings_path(base).display()); } else { println!("  file       : {}", ret::settings_path(base).display()); }
+            if phosphor::lang::is_en() { println!("  in force   : {} days", ret::effective(base)); } else { println!("  in vigore  : {} giorni", ret::effective(base)); }
             if ret::at_risk(base) {
                 println!();
                 println!("⚠ Claude Code cancella da solo i transcript piu' vecchi di cosi', all'avvio.");
-                println!("  Niente cestino, niente backup: un progetto fermo da un mese sparisce.");
+                if phosphor::lang::is_en() { println!("  No recycle bin, no backup: a project idle for a month disappears."); } else { println!("  Niente cestino, niente backup: un progetto fermo da un mese sparisce."); }
                 println!();
-                println!("  phosphor retention {}    per tenerli 10 anni", ret::RECOMMENDED_DAYS);
-                println!("  phosphor retention 365     per tenerli un anno");
+                if phosphor::lang::is_en() { println!("  phosphor retention {}    to keep them ten years", ret::RECOMMENDED_DAYS); } else { println!("  phosphor retention {}    per tenerli 10 anni", ret::RECOMMENDED_DAYS); }
+                if phosphor::lang::is_en() { println!("  phosphor retention 365     to keep them one year"); } else { println!("  phosphor retention 365     per tenerli un anno"); }
             }
             println!();
-            println!("Codex non ha un'impostazione equivalente: non pota per data, tiene tutto.");
-            println!("Contro TUTTO il resto (pulitori disco, sync, cancellazioni a mano):");
+            if phosphor::lang::is_en() { println!("Codex has no equivalent setting: it does not prune by date, it keeps everything."); } else { println!("Codex non ha un'impostazione equivalente: non pota per data, tiene tutto."); }
+            if phosphor::lang::is_en() { println!("Against EVERYTHING else (disk cleaners, sync, manual deletion):"); } else { println!("Contro TUTTO il resto (pulitori disco, sync, cancellazioni a mano):"); }
             println!("  phosphor vault on");
         }
         Some(a) => {
@@ -519,7 +712,7 @@ fn do_retention_cmd(base: &std::path::Path, arg: Option<&str>) {
                 Ok(p) => {
                     println!("✓ cleanupPeriodDays: {before} -> {days} giorni");
                     println!("  {}", p.display());
-                    println!("  copia del precedente in settings.json.phosphor-bak");
+                    if phosphor::lang::is_en() { println!("  a copy of the previous file in settings.json.phosphor-bak"); } else { println!("  copia del precedente in settings.json.phosphor-bak"); }
                     println!();
                     println!("Vale da qui in avanti. Quello gia' cancellato non torna:");
                     println!("Phosphor lo ricostruisce come puo' dai prompt (righe ⚱).");
@@ -574,7 +767,8 @@ fn do_vault_cmd(base: &std::path::Path, verb: &str, arg: Option<&str>) {
                 let (sessions, _) = phosphor::scan_all(base, &mut cache);
                 let failed = phosphor::vault::link_all(base, &sessions).1;
                 let (n, bytes, _, _) = phosphor::vault::stats(base);
-                println!("Vault ACCESO — {}", phosphor::vault::dir(base).display());
+                let d = phosphor::vault::dir(base).display().to_string();
+                println!("{}", t!(format!("Vault ACCESO — {d}"), format!("Vault ON — {d}")));
                 println!(
                     "  {n} transcript al sicuro ({:.1} MB di conversazioni) per 0 byte in piu': sono hard link.",
                     bytes as f64 / 1_048_576.0
@@ -588,7 +782,7 @@ fn do_vault_cmd(base: &std::path::Path, verb: &str, arg: Option<&str>) {
             } else {
                 println!("Vault SPENTO: non collego piu' nulla.");
                 println!("  Quello gia' nel vault resta dov'e' — {}", phosphor::vault::dir(base).display());
-                println!("  Cancella quella cartella a mano per liberare lo spazio degli orfani.");
+                if phosphor::lang::is_en() { println!("  Delete that folder by hand to free the orphans' space."); } else { println!("  Cancella quella cartella a mano per liberare lo spazio degli orfani."); }
             }
         }
         "restore" => {
@@ -617,17 +811,17 @@ fn do_vault_cmd(base: &std::path::Path, verb: &str, arg: Option<&str>) {
         _ => {
             let (n, bytes, orphans, obytes) = phosphor::vault::stats(base);
             let mb = |b: u64| format!("{:.1} MB", b as f64 / 1_048_576.0);
-            println!("Vault: {}", if cfg.vault { "ACCESO" } else { "spento" });
-            println!("  cartella   : {}", phosphor::vault::dir(base).display());
-            println!("  transcript : {n}  ({} in totale)", mb(bytes));
-            println!("  orfani     : {orphans}  ({})  <- i soli byte che paghi davvero", mb(obytes));
+            println!("Vault: {}", if cfg.vault { t!("ACCESO", "ON") } else { t!("spento", "off") });
+            if phosphor::lang::is_en() { println!("  folder     : {}", phosphor::vault::dir(base).display()); } else { println!("  cartella   : {}", phosphor::vault::dir(base).display()); }
+            if phosphor::lang::is_en() { println!("  transcripts: {n}  ({} in total)", mb(bytes)); } else { println!("  transcript : {n}  ({} in totale)", mb(bytes)); }
+            if phosphor::lang::is_en() { println!("  orphans    : {orphans}  ({})  <- the only bytes you really pay for", mb(obytes)); } else { println!("  orfani     : {orphans}  ({})  <- i soli byte che paghi davvero", mb(obytes)); }
             println!();
-            println!("Un hard link e' un secondo nome per gli stessi byte: finche' l'originale");
-            println!("esiste il vault non occupa nulla. Diventa proprietario solo di cio' che");
-            println!("qualcun altro ha cancellato, cioe' esattamente cio' che avresti perso.");
+            if phosphor::lang::is_en() { println!("A hard link is a second name for the same bytes: while the original"); } else { println!("Un hard link e' un secondo nome per gli stessi byte: finche' l'originale"); }
+            if phosphor::lang::is_en() { println!("exists the vault costs nothing. It owns only what somebody else has"); } else { println!("esiste il vault non occupa nulla. Diventa proprietario solo di cio' che"); }
+            if phosphor::lang::is_en() { println!("deleted — which is exactly what you would have lost."); } else { println!("qualcun altro ha cancellato, cioe' esattamente cio' che avresti perso."); }
             if !cfg.vault {
                 println!();
-                println!("  phosphor vault on    per accenderlo");
+                if phosphor::lang::is_en() { println!("  phosphor vault on    to turn it on"); } else { println!("  phosphor vault on    per accenderlo"); }
             }
         }
     }
@@ -941,7 +1135,7 @@ fn do_remote_cmd(base: &std::path::Path, verb: &str, alias: Option<&str>) {
             cfg.remotes.push(a.to_string());
             phosphor::config::save(base, &cfg);
             println!("✓ Aggiunto «{a}» (Phosphor salva SOLO l'alias: host e chiavi restano in ~/.ssh/config).");
-            println!("  Prova subito:  phosphor fleet");
+            if phosphor::lang::is_en() { println!("  Try it now:  phosphor fleet"); } else { println!("  Prova subito:  phosphor fleet"); }
         }
         "rm" | "remove" => {
             let a = match alias {
@@ -1406,6 +1600,11 @@ fn do_watch(base: &std::path::Path, cache_map: &mut std::collections::HashMap<St
 }
 
 fn main() {
+    // La lingua PRIMA di leggere gli argomenti: `--help` stampa ed esce dentro
+    // il ciclo di parsing, quindi caricarla piu' tardi la lascerebbe fuori
+    // proprio dalla pagina che serve a chi non sa ancora come si usa.
+    // Con --dir viene riletta dopo, dalla configurazione di QUELLA cartella.
+    phosphor::lang::set_from_code(&config::load(&claude_base()).lang);
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut port: u16 = 8787;
     let mut watch_opt: Option<u64> = None;
@@ -1714,10 +1913,19 @@ fn main() {
     }
 
     let cfg = config::load(&base);
+    // La lingua prima di qualunque stampa: la riga «Scansione di …» e' gia'
+    // interfaccia, e uscirebbe in italiano a chi ha scelto l'inglese.
+    phosphor::lang::set_from_code(&cfg.lang);
     let watch = watch_opt.unwrap_or(cfg.watch);
 
     if !json_mode {
-        eprint!("Scansione di {} … ", base.display());
+        eprint!(
+            "{}",
+            t!(
+                format!("Scansione di {} … ", base.display()),
+                format!("Scanning {} … ", base.display()),
+            )
+        );
     }
     let t0 = std::time::Instant::now();
     let mut cache_map = cache::load(&base);
@@ -1726,11 +1934,8 @@ fn main() {
     cache::save(&base, &sessions);
     phosphor::add_recovered(&base, &mut sessions);
     if !json_mode {
-        eprintln!(
-            "{} sessioni in {:.1}s",
-            sessions.len(),
-            t0.elapsed().as_secs_f64()
-        );
+        let (n, secs) = (sessions.len(), t0.elapsed().as_secs_f64());
+        eprintln!("{}", t!(format!("{n} sessioni in {secs:.1}s"), format!("{n} sessions in {secs:.1}s")));
     }
 
     // CLI filters (apply to ls/json output).

@@ -3,6 +3,7 @@
 //! Fully mouse-driven (clickable tabs, headers, shortcut bar, buttons, themes)
 //! with a persistent shortcut legend and a polished retro look.
 
+use crate::t;
 use crate::config::{cost, Prices};
 use crate::json::P;
 use crate::scan::Session;
@@ -252,9 +253,109 @@ const TIPS: &[&str] = &[
     "Claude cancella a trenta giorni: díglielo tu.",
     "Le sessioni Codex portano il segno  ◆ .",
     "⛁ sta nel vault;  ⚱ fu ritrovata dopo.",
+    "Con  L  si muta la lingua: it ⇄ en.",
 ];
 
-const SORTS: [&str; 9] = ["attività", "progetto", "titolo", "msg", "token", "costo", "agenti", "stato", "dimens"];
+/// Le stesse pillole in inglese.
+///
+/// Non una traduzione riga per riga: l'italiano è in dolce stil novo, e a un
+/// endecasillabo trecentesco corrisponde, in inglese, il verso di Shakespeare —
+/// stessa età, stessa musica, stessa promessa di dire una cosa sola per riga.
+/// Tradurre alla lettera avrebbe dato prosa storta in due lingue invece di
+/// versi in una.
+///
+/// La regola resta: il tasto e il comando sono letterali.
+const TIPS_EN: &[&str] = &[
+    "One touch upon the row, and it doth open.",
+    "Who presseth  v  shall read what once was said.",
+    "↳ : this one was born of another talk.",
+    "●  lives,  ◐  rests,  ·  is already done.",
+    "⏎  is Enter, and it opens the detail.",
+    "With  /  thou searchest prompts, files and tools.",
+    "With  f  there stayeth only that estate.",
+    "With  o  the ordering column is changed.",
+    "With  s  the order turneth on its head.",
+    "Touch thou the header: it will sort for thee.",
+    "Tab, or  1 2 3 : and the view is changed.",
+    "View  2 : every project gathered in a sum.",
+    "View  3 : how the days dispose of them.",
+    "With  r  the conversation is resumed.",
+    "With  a  behold the agents that did serve.",
+    "With  e  it writes in CSV and in JSON.",
+    "With  x  make thou a  .phx  to travel with.",
+    "With  i  receive a  .phx  another gave.",
+    "With  t  and  T  the colours are exchanged.",
+    "Seven palettes: green, amber, ice and more…",
+    "With  p  the drawing turns to little squares.",
+    "With  m  thou changest what the charts measure.",
+    "With  R  it goes to read the whole again.",
+    "With  ?  the help unfolds, and tells thee all.",
+    "With  q  thou partest; Phosphor takes its leave.",
+    "SIZE : how heavy is the memory.",
+    "DATE : the hour of the final word.",
+    "The title tells their weight when taken all.",
+    "Import destroyeth not: it only adds.",
+    "The  .phx  beareth every subfolder with it.",
+    "All things are touched: none is but painted.",
+    "Resumes are gathered under  [+] / [-] .",
+    "Upon that row:  +  opens,  -  gathers in.",
+    "With  A  all open, or else all are closed.",
+    "The right-hand button calls the whole menu.",
+    "The point  .  doth call that selfsame menu.",
+    "The wheel will make the list to scroll.",
+    "In the detail: RESUME · READ · AGENTS.",
+    "Who doth resume shall have a console his own.",
+    "Another path? pathRemaps in phosphor.json.",
+    "With a remap the session forks in two.",
+    "phosphor cost : what all thy speech hath cost.",
+    "phosphor cost --explain : it shows the reckoning.",
+    "phosphor limits : the plan, and when it turns.",
+    "phosphor watch : it keeps watch, and warns thee.",
+    "phosphor clean : the room, and the empty ones.",
+    "phosphor find <text> : search from the console.",
+    "phosphor --web : the same within a browser.",
+    "phosphor sync push : it sends thy bundles forth.",
+    "phosphor sync pull : and finds them otherwhere.",
+    "Nothing doth move unless thou bid it move.",
+    "Phosphor doth read and touch not: only look.",
+    "Naught leaveth here: the whole of it stays home.",
+    "Set thou a budget in phosphor.json; it watches.",
+    "The prices are thine: change them, phosphor.json.",
+    "Each writing asketh first thy yea or nay.",
+    "Each export bears its date: none is undone.",
+    "Home  and  End : to the beginning, and the end.",
+    "PgUp  and  PgDn : ten rows at every turn.",
+    "In the reader:  ↑↓  and wheel will scroll.",
+    "AG : how many agents served without a word.",
+    "Who clicks without a window, shuts it so.",
+    "phosphor --dir <way> : another  .claude .",
+    "To take it hence: the  .phx  and the code.",
+    "🖰 below: or mouse alone, or mouse and keys.",
+    "Each row of help  ?  is a command: touch it.",
+    "With  W  thy year is turned into a picture.",
+    "With  V  returns to life what lay in vault.",
+    "With  F  thou askest of thine other machines.",
+    "With  H  the project is set gently aside.",
+    "vault on : and nothing more shall be taken.",
+    "Claude clears at thirty days: go tell it not to.",
+    "The Codex sessions bear the mark  ◆ .",
+    "⛁ lies in vault;  ⚱ was found again after.",
+    "With  L  the tongue is changed: it ⇄ en.",
+];
+
+/// Le pillole nella lingua scelta.
+fn tips() -> &'static [&'static str] {
+    t!(TIPS, TIPS_EN)
+}
+
+/// I nomi delle colonne d'ordinamento, nella lingua scelta. Una funzione e non
+/// una costante: la lingua si cambia a programma acceso.
+fn sorts() -> [&'static str; 9] {
+    t!(
+        ["attività", "progetto", "titolo", "msg", "token", "costo", "agenti", "stato", "dimens"],
+        ["activity", "project", "title", "msg", "tokens", "cost", "agents", "state", "size"],
+    )
+}
 
 // Action codes dispatched by clickable shortcut chips.
 const A_UP: u16 = 1;
@@ -292,6 +393,7 @@ const A_FLEET: u16 = 33;
 const A_VAULT_RESTORE: u16 = 34;
 const A_WRAPPED: u16 = 35;
 const A_MOUSE_MODE: u16 = 36;
+const A_LANG: u16 = 37;
 
 // I temi vivono in un file loro: una tavolozza non tocca lo stato
 // dell'applicazione, ed e' uno dei pochi punti di questo file con una
@@ -830,7 +932,7 @@ impl App {
             detail: false, help: false, show_agents: false, agents: vec![],
             status: match &prices_stale {
                 Some(w) => format!("⚠ {w}"),
-                None => String::from("pronto · ? aiuto"),
+                None => t!("pronto · ? aiuto", "ready · ? help").to_string(),
             },
             blink: true, dry: false,
             rect_tabs: Rect::default(), rect_table: Rect::default(), rect_shortcut: Rect::default(),
@@ -871,7 +973,7 @@ impl App {
     fn selected_is_remote(&mut self, action: &str) -> bool {
         let remote = self.selected().map(|s| !s.host.is_empty()).unwrap_or(false);
         if remote {
-            self.status = format!("sessione remota: {action} non disponibile (solo r = riprendi là, d = dettaglio)");
+            self.status = if crate::lang::is_en() { format!("remote session: {action} not available (only r = resume there, d = detail)") } else { format!("sessione remota: {action} non disponibile (solo r = riprendi là, d = dettaglio)") };
         }
         remote
     }
@@ -881,7 +983,7 @@ impl App {
     fn selected_is_ghost(&mut self, action: &str) -> bool {
         let ghost = self.selected().map(|s| s.is_ghost()).unwrap_or(false);
         if ghost {
-            self.status = format!("sessione recuperata (transcript cancellato da Claude Code): {action} non disponibile");
+            self.status = if crate::lang::is_en() { format!("recovered session (transcript deleted by Claude Code): {action} not available") } else { format!("sessione recuperata (transcript cancellato da Claude Code): {action} non disponibile") };
         }
         ghost
     }
@@ -892,7 +994,7 @@ impl App {
     fn selected_is_codex(&mut self, action: &str) -> bool {
         let codex = self.selected().map(|s| s.is_codex()).unwrap_or(false);
         if codex {
-            self.status = format!("sessione Codex (~/.codex): {action} non disponibile");
+            self.status = if crate::lang::is_en() { format!("Codex session (~/.codex): {action} not available") } else { format!("sessione Codex (~/.codex): {action} non disponibile") };
         }
         codex
     }
@@ -1071,10 +1173,10 @@ impl App {
             for m in self.row_meta.clone() {
                 if m.children > 0 { self.expanded_chains.insert(self.all[m.root].id.clone()); }
             }
-            self.status = "riprese: tutte espanse".into();
+            self.status = t!("riprese: tutte espanse", "resumes: all expanded").into();
         } else {
             self.expanded_chains.clear();
-            self.status = "riprese: tutte compresse".into();
+            self.status = t!("riprese: tutte compresse", "resumes: all collapsed").into();
         }
         self.collapse();
         // Restore by the kept id if it is still visible, else by its chain head.
@@ -1091,14 +1193,14 @@ impl App {
             for id in ids {
                 if !self.favorites.remove(&id) { self.favorites.insert(id); }
             }
-            self.status = format!("★ preferiti aggiornati per {} selezionate", self.marked.len());
+            self.status = if crate::lang::is_en() { format!("★ favorites updated for {} selected", self.marked.len()) } else { format!("★ preferiti aggiornati per {} selezionate", self.marked.len()) };
         } else {
             let id = match self.selected_id() { Some(i) => i, None => return };
             if self.favorites.remove(&id) {
-                self.status = "☆ rimosso dai preferiti".into();
+                self.status = t!("☆ rimosso dai preferiti", "☆ removed from favorites").into();
             } else {
                 self.favorites.insert(id);
-                self.status = "★ aggiunto ai preferiti".into();
+                self.status = t!("★ aggiunto ai preferiti", "★ added to favorites").into();
             }
         }
         if !self.dry { self.persist_config(); }
@@ -1110,7 +1212,7 @@ impl App {
         if self.selected_is_remote("selezione bulk") { return; }
         if let Some(id) = self.selected_id() {
             if !self.marked.remove(&id) { self.marked.insert(id); }
-            self.status = format!("{} selezionate (spazio marca · Esc azzera · x bundle · X cancella · * preferiti)", self.marked.len());
+            self.status = if crate::lang::is_en() { format!("{} selected (space marks · Esc clears · x bundle · X delete · * favorites)", self.marked.len()) } else { format!("{} selezionate (spazio marca · Esc azzera · x bundle · X cancella · * preferiti)", self.marked.len()) };
             self.move_sel(1);
         }
     }
@@ -1118,32 +1220,40 @@ impl App {
     /// marked session is live. Deletes only the chosen transcripts + their sidecars.
     fn request_delete_marked(&mut self) {
         if self.marked.is_empty() {
-            self.status = "nessuna sessione selezionata (spazio per marcare)".into();
+            self.status = t!("nessuna sessione selezionata (spazio per marcare)", "no session selected (space to mark)").into();
             return;
         }
         let sel: Vec<&Session> = self.all.iter().filter(|s| self.marked.contains(&s.id)).collect();
         if sel.iter().any(|s| s.is_ghost()) {
-            self.status = "⚠ una selezionata è recuperata: non ha un file da cancellare".into();
+            self.status = t!("⚠ una selezionata è recuperata: non ha un file da cancellare", "⚠ one selected is recovered: it has no file to delete").into();
             return;
         }
         if sel.iter().any(|s| s.is_codex()) {
             // delete_session_file is confined to projects/ and would refuse
             // anyway; say so up front instead of reporting a silent 0 deleted.
-            self.status = "⚠ una selezionata è Codex: cancellala con  codex delete <id>".into();
+            self.status = t!("⚠ una selezionata è Codex: cancellala con  codex delete <id>", "⚠ one selected is Codex: delete it with  codex delete <id>").into();
             return;
         }
         if sel.iter().any(|s| s.live == "running" || s.live == "idle") {
-            self.status = "⚠ una selezionata è live: deselezionala prima".into();
+            self.status = t!("⚠ una selezionata è live: deselezionala prima", "⚠ one selected is live: deselect it first").into();
             return;
         }
         let bytes: u64 = sel.iter().map(|s| s.size).sum();
         let paths: Vec<String> = sel.iter().map(|s| s.path.clone()).collect();
-        let lines = vec![
-            format!("Cancello {} sessioni selezionate  ({:.1} MB) — IRREVERSIBILE.", paths.len(), bytes as f64 / 1_048_576.0),
-            "Solo i transcript scelti (+ le loro sottocartelle),".into(),
-            "confinati a projects/. Nessun altro file toccato.".into(),
-        ];
-        self.confirm = Some(Confirm { title: " CONFERMA CANCELLA SELEZIONE ".into(), lines, action: Pending::DeleteMarked { paths }, alts: Vec::new(), buttons: None, cancel: None });
+        let (n, mb) = (paths.len(), bytes as f64 / 1_048_576.0);
+        let lines = t!(
+            vec![
+                format!("Cancello {n} sessioni selezionate  ({mb:.1} MB) — IRREVERSIBILE."),
+                "Solo i transcript scelti (+ le loro sottocartelle),".into(),
+                "confinati a projects/. Nessun altro file toccato.".into(),
+            ],
+            vec![
+                format!("Deleting {n} selected sessions  ({mb:.1} MB) — NO UNDO."),
+                "Only the chosen transcripts (+ their subfolders),".into(),
+                "confined to projects/. No other file is touched.".into(),
+            ],
+        );
+        self.confirm = Some(Confirm { title: t!(" CONFERMA CANCELLA SELEZIONE ", " CONFIRM DELETE SELECTION ").into(), lines, action: Pending::DeleteMarked { paths }, alts: Vec::new(), buttons: None, cancel: None });
     }
     /// Perform the bulk delete (already confirmed): remove each file confined to
     /// projects/, drop them from the view, clear the selection.
@@ -1158,7 +1268,7 @@ impl App {
         self.apply_filter();
         let v = self.view.len();
         self.ts.select(if v > 0 { Some(0) } else { None });
-        self.status = format!("✓ {n} sessioni cancellate");
+        self.status = t!(format!("✓ {n} sessioni cancellate"), format!("✓ {n} sessions deleted"));
     }
     fn start_note_edit(&mut self) {
         let id = match self.selected_id() { Some(i) => i, None => return };
@@ -1184,10 +1294,10 @@ impl App {
             };
             if text.is_empty() {
                 map.remove(&id);
-                self.status = format!("{kind} rimosso");
+                self.status = if crate::lang::is_en() { format!("{kind} removed") } else { format!("{kind} rimosso") };
             } else {
                 map.insert(id, text);
-                self.status = format!("{kind} salvato");
+                self.status = if crate::lang::is_en() { format!("{kind} saved") } else { format!("{kind} salvato") };
             }
             if !self.dry { self.persist_config(); }
         }
@@ -1210,7 +1320,7 @@ impl App {
         if !self.dry {
             crate::open_folder(&dir);
         }
-        self.status = format!("apro  {}", clip(&dir, 44));
+        self.status = if crate::lang::is_en() { format!("opening  {}", clip(&dir, 44)) } else { format!("apro  {}", clip(&dir, 44)) };
     }
     /// Ask before the fleet fetch: it is the only action that leaves this
     /// machine. It opens an ssh connection to every registered PC and runs a
@@ -1222,7 +1332,7 @@ impl App {
         }
         let aliases = crate::config::load(&self.base).remotes;
         if aliases.is_empty() {
-            self.status = "nessun PC registrato:  phosphor remote add <alias>".into();
+            self.status = t!("nessun PC registrato:  phosphor remote add <alias>", "no PC registered:  phosphor remote add <alias>").into();
             return;
         }
         let mut lines = vec![
@@ -1236,7 +1346,7 @@ impl App {
         lines.push("È l'unica cosa che esce da questa macchina. Sola lettura:".into());
         lines.push("niente viene scritto sugli altri PC.".into());
         self.confirm = Some(Confirm {
-            title: " CONFERMA INTERROGA FLOTTA ".into(),
+            title: t!(" CONFERMA INTERROGA FLOTTA ", " CONFIRM QUERY FLEET ").into(),
             lines,
             action: Pending::Fleet,
             alts: Vec::new(), buttons: None, cancel: None,
@@ -1252,7 +1362,7 @@ impl App {
         let s = match self.selected() {
             Some(s) if s.is_vaulted() => s.clone(),
             Some(_) => {
-                self.status = "V vale solo sulle righe ⛁ (quelle salvate dal vault)".into();
+                self.status = t!("V vale solo sulle righe ⛁ (quelle salvate dal vault)", "V only works on ⛁ rows (the ones saved by the vault)").into();
                 return;
             }
             None => return,
@@ -1260,18 +1370,34 @@ impl App {
         let agent = if s.is_codex() { "Codex" } else { "Claude Code" };
         let cmd = if s.is_codex() { "codex resume" } else { "claude --resume" };
         self.confirm = Some(Confirm {
-            title: " CONFERMA RIPRISTINA DAL VAULT ".into(),
-            lines: vec![
-                format!("Rimetto questo transcript nel magazzino di {agent},"),
-                "da cui era stato cancellato:".into(),
-                String::new(),
-                format!("  {}", clip(&s.title.replace('\n', " "), 56)),
-                String::new(),
-                "È un hard link, non una copia: zero byte in più, e il vault".into(),
-                "tiene comunque il suo. Non sovrascrive mai nulla.".into(),
-                String::new(),
-                format!("Dopo, {cmd} la ritrova."),
-            ],
+            title: t!(" CONFERMA RIPRISTINA DAL VAULT ", " CONFIRM RESTORE FROM VAULT ").into(),
+            lines: {
+                let title = clip(&s.title.replace('\n', " "), 56);
+                t!(
+                    vec![
+                        format!("Rimetto questo transcript nel magazzino di {agent},"),
+                        "da cui era stato cancellato:".into(),
+                        String::new(),
+                        format!("  {title}"),
+                        String::new(),
+                        "È un hard link, non una copia: zero byte in più, e il vault".into(),
+                        "tiene comunque il suo. Non sovrascrive mai nulla.".into(),
+                        String::new(),
+                        format!("Dopo, {cmd} la ritrova."),
+                    ],
+                    vec![
+                        format!("I will put this transcript back into {agent}'s own store,"),
+                        "which is where it was deleted from:".into(),
+                        String::new(),
+                        format!("  {title}"),
+                        String::new(),
+                        "It is a hard link, not a copy: zero extra bytes, and the".into(),
+                        "vault keeps its own. Nothing is ever overwritten.".into(),
+                        String::new(),
+                        format!("After this, {cmd} will find it again."),
+                    ],
+                )
+            },
             action: Pending::VaultRestore,
             alts: Vec::new(), buttons: None, cancel: None,
         });
@@ -1285,6 +1411,25 @@ impl App {
     /// commands are run from rather than a list to memorise. The keys keep
     /// working either way — taking them away from someone who knows them would
     /// be a loss, not a simplification.
+    /// Cambia lingua all'istante: italiano ⇄ inglese.
+    ///
+    /// Sta su un tasto solo e su un chip visibile perche' chi ne ha bisogno e'
+    /// proprio chi non capisce quello che sta leggendo — mandarlo a cercare la
+    /// voce in un file di configurazione scritto nella lingua sbagliata
+    /// sarebbe una barzelletta.
+    fn toggle_lang(&mut self) {
+        crate::lang::set_en(!crate::lang::is_en());
+        if !self.dry {
+            let mut cfg = crate::config::load(&self.base);
+            cfg.lang = crate::lang::code().to_string();
+            crate::config::save(&self.base, &cfg);
+        }
+        self.status = t!(
+            "lingua: italiano  ·  L per English".to_string(),
+            "language: English  ·  L for italiano".to_string(),
+        );
+    }
+
     fn toggle_mouse_mode(&mut self) {
         self.mouse_only = !self.mouse_only;
         if !self.dry {
@@ -1306,16 +1451,27 @@ impl App {
             return;
         }
         self.confirm = Some(Confirm {
-            title: " CONFERMA CARD WRAPPED ".into(),
-            lines: vec![
-                "Scrivo sul Desktop due file NUOVI (mai sovrascritti):".into(),
-                String::new(),
-                "  phosphor-wrapped-<anno>.png   da condividere".into(),
-                "  phosphor-wrapped-<anno>.svg   vettoriale".into(),
-                String::new(),
-                "La card è anonima: solo numeri, nessun nome di progetto".into(),
-                "né percorso né testo dei prompt.".into(),
-            ],
+            title: t!(" CONFERMA CARD WRAPPED ", " CONFIRM WRAPPED CARD ").into(),
+            lines: t!(
+                vec![
+                    "Scrivo sul Desktop due file NUOVI (mai sovrascritti):".into(),
+                    String::new(),
+                    "  phosphor-wrapped-<anno>.png   da condividere".into(),
+                    "  phosphor-wrapped-<anno>.svg   vettoriale".into(),
+                    String::new(),
+                    "La card è anonima: solo numeri, nessun nome di progetto".into(),
+                    "né percorso né testo dei prompt.".into(),
+                ],
+                vec![
+                    "I will write TWO NEW files to your Desktop (never overwritten):".into(),
+                    String::new(),
+                    "  phosphor-wrapped-<year>.png   to share".into(),
+                    "  phosphor-wrapped-<year>.svg   vector".into(),
+                    String::new(),
+                    "The card is anonymous: numbers only, no project name,".into(),
+                    "no path, no prompt text.".into(),
+                ],
+            ),
             action: Pending::Wrapped,
             alts: Vec::new(), buttons: None, cancel: None,
         });
@@ -1339,7 +1495,7 @@ impl App {
         };
         let card = crate::wrapped::render(&self.all, &cfg, now_ms(), &opts);
         if card.sessions_count == 0 {
-            self.status = "nessuna sessione quest'anno: niente card".into();
+            self.status = t!("nessuna sessione quest'anno: niente card", "no sessions this year: no card").into();
             return;
         }
         let dir = std::env::var("USERPROFILE")
@@ -1372,6 +1528,22 @@ impl App {
             return;
         }
         let days = crate::retention::effective(&self.base);
+        let lines_en = vec![
+            format!("Claude Code DELETES its transcripts after {days} days."),
+            "It does it by itself at startup: no recycle bin, no backup.".into(),
+            "That is why a project untouched for a month vanishes from here.".into(),
+            String::new(),
+            "I can raise  cleanupPeriodDays  in ~/.claude/settings.json.".into(),
+            "I change ONE number: your other settings stay untouched,".into(),
+            "and I keep a copy in settings.json.phosphor-bak.".into(),
+            String::new(),
+            "   1   10 years (3650 days) — recommended".into(),
+            "   2   1 year   (365 days)".into(),
+            "   3   leave it as it is, stop asking".into(),
+            String::new(),
+            "What is already deleted does not come back. To lose nothing".into(),
+            "else, beyond this setting too:  phosphor vault on".into(),
+        ];
         let lines = vec![
             format!("Claude Code CANCELLA i transcript dopo {days} giorni."),
             "Lo fa da solo all'avvio: niente cestino, niente backup.".into(),
@@ -1389,8 +1561,8 @@ impl App {
             "altro anche fuori da questa impostazione:  phosphor vault on".into(),
         ];
         self.confirm = Some(Confirm {
-            title: " LA TUA CRONOLOGIA SI STA CANCELLANDO ".into(),
-            lines,
+            title: t!(" LA TUA CRONOLOGIA SI STA CANCELLANDO ", " YOUR HISTORY IS BEING DELETED ").into(),
+            lines: t!(lines, lines_en),
             // Enter/s = la scelta consigliata, così la via rapida è quella giusta.
             action: Pending::SetRetention { days: crate::retention::RECOMMENDED_DAYS },
             alts: vec![
@@ -1412,58 +1584,115 @@ impl App {
     const TOUR_PAGES: usize = 3;
 
     fn tour_page(&mut self, page: u8) {
-        let (title, lines): (&str, Vec<String>) = match page {
-            0 => (
-                " BENVENUTO — 1 di 3: LA LISTA ",
-                vec![
-                    "Ogni riga è una sessione di lavoro con un agente:".into(),
-                    "Claude Code e Codex CLI, nella stessa lista.".into(),
-                    String::new(),
-                    "  • clicca una riga        → apri la sessione".into(),
-                    "  • clicca un'intestazione → ordina per quella colonna".into(),
-                    "  • tasto destro su una riga → tutte le azioni su quella".into(),
-                    String::new(),
-                    "I pallini a sinistra dicono com'è finita: ● viva, ◐ ferma,".into(),
-                    "· conclusa. ⛁ è al sicuro nel vault, ⚱ è stata recuperata".into(),
-                    "dopo che l'agente l'aveva già cancellata.".into(),
-                ],
-            ),
-            1 => (
-                " BENVENUTO — 2 di 3: SI FA TUTTO COL MOUSE ",
-                vec![
-                    "Non serve imparare nessuna scorciatoia.".into(),
-                    String::new(),
-                    "  • l'elenco completo dei comandi è il pannello  ?".into(),
-                    "    e ogni sua riga È il comando: clicchi la descrizione".into(),
-                    "    e parte. Non devi sapere che era la lettera «v».".into(),
-                    String::new(),
-                    "  • per chiudere qualunque finestra: CLICCA FUORI.".into(),
-                    "    È l'unico gesto che vale la pena ricordare.".into(),
-                    String::new(),
-                    "In basso c'è l'interruttore fra le due modalità:".into(),
-                    "«mouse+tasti» mostra anche le lettere mentre clicchi,".into(),
-                    "«solo mouse» le toglie di mezzo. I tasti funzionano".into(),
-                    "comunque in entrambe.".into(),
-                ],
-            ),
-            _ => (
-                " BENVENUTO — 3 di 3: NIENTE ALLE TUE SPALLE ",
-                vec![
-                    "Phosphor legge e basta. Non modifica i transcript e non".into(),
-                    "manda niente in rete di sua iniziativa.".into(),
-                    String::new(),
-                    "Tutto ciò che scrive un file, contatta un altro PC o".into(),
-                    "cancella qualcosa te lo dice PRIMA e aspetta un sì.".into(),
-                    String::new(),
-                    "Una cosa che vale la pena sapere subito: Claude Code".into(),
-                    "cancella i suoi transcript dopo 30 giorni, da solo e".into(),
-                    "senza cestino. Per tenerli vivi senza occupare spazio:".into(),
-                    "    phosphor vault on".into(),
-                    String::new(),
-                    "Buon lavoro. Questo giro non si ripresenta; l'aiuto  ?".into(),
-                    "c'è sempre.".into(),
-                ],
-            ),
+        let (title, lines): (&str, Vec<String>) = if crate::lang::is_en() {
+            match page {
+                0 => (
+                    " WELCOME — 1 of 3: THE LIST ",
+                    vec![
+                        "Every row is a working session with an agent:".into(),
+                        "Claude Code and the Codex CLI, in one list.".into(),
+                        String::new(),
+                        "  • click a row          → open the session".into(),
+                        "  • click a header       → sort by that column".into(),
+                        "  • right-click a row    → every action on it".into(),
+                        String::new(),
+                        "The dots on the left say how it ended: ● running,".into(),
+                        "◐ idle, · done. ⛁ is safe in the vault, ⚱ was".into(),
+                        "recovered after the agent had already deleted it.".into(),
+                    ],
+                ),
+                1 => (
+                    " WELCOME — 2 of 3: IT ALL WORKS BY MOUSE ",
+                    vec![
+                        "You do not have to learn a single shortcut.".into(),
+                        String::new(),
+                        "  • the full list of commands is the  ?  panel,".into(),
+                        "    and every row of it IS the command: click the".into(),
+                        "    description and it runs. No need to know it was «v».".into(),
+                        String::new(),
+                        "  • to close any window: CLICK OUTSIDE IT.".into(),
+                        "    That is the one gesture worth remembering.".into(),
+                        String::new(),
+                        "At the bottom there is the switch between the two modes:".into(),
+                        "«mouse+keys» also shows the letters while you click,".into(),
+                        "«mouse only» gets them out of the way. The keys work".into(),
+                        "in both. Beside it,  L  switches language.".into(),
+                    ],
+                ),
+                _ => (
+                    " WELCOME — 3 of 3: NOTHING BEHIND YOUR BACK ",
+                    vec![
+                        "Phosphor only reads. It does not modify transcripts".into(),
+                        "and sends nothing over the network on its own.".into(),
+                        String::new(),
+                        "Anything that writes a file, contacts another PC or".into(),
+                        "deletes something tells you FIRST and waits for a yes.".into(),
+                        String::new(),
+                        "One thing worth knowing right away: Claude Code".into(),
+                        "deletes its own transcripts after 30 days, by itself".into(),
+                        "and with no recycle bin. To keep them alive at no".into(),
+                        "cost in space:".into(),
+                        "    phosphor vault on".into(),
+                        String::new(),
+                        "Enjoy. This tour does not come back; the  ?  help".into(),
+                        "is always there.".into(),
+                    ],
+                ),
+            }
+        } else {
+            match page {
+                0 => (
+                    " BENVENUTO — 1 di 3: LA LISTA ",
+                    vec![
+                        "Ogni riga è una sessione di lavoro con un agente:".into(),
+                        "Claude Code e Codex CLI, nella stessa lista.".into(),
+                        String::new(),
+                        "  • clicca una riga        → apri la sessione".into(),
+                        "  • clicca un'intestazione → ordina per quella colonna".into(),
+                        "  • tasto destro su una riga → tutte le azioni su quella".into(),
+                        String::new(),
+                        "I pallini a sinistra dicono com'è finita: ● viva, ◐ ferma,".into(),
+                        "· conclusa. ⛁ è al sicuro nel vault, ⚱ è stata recuperata".into(),
+                        "dopo che l'agente l'aveva già cancellata.".into(),
+                    ],
+                ),
+                1 => (
+                    " BENVENUTO — 2 di 3: SI FA TUTTO COL MOUSE ",
+                    vec![
+                        "Non serve imparare nessuna scorciatoia.".into(),
+                        String::new(),
+                        "  • l'elenco completo dei comandi è il pannello  ?".into(),
+                        "    e ogni sua riga È il comando: clicchi la descrizione".into(),
+                        "    e parte. Non devi sapere che era la lettera «v».".into(),
+                        String::new(),
+                        "  • per chiudere qualunque finestra: CLICCA FUORI.".into(),
+                        "    È l'unico gesto che vale la pena ricordare.".into(),
+                        String::new(),
+                        "In basso c'è l'interruttore fra le due modalità:".into(),
+                        "«mouse+tasti» mostra anche le lettere mentre clicchi,".into(),
+                        "«solo mouse» le toglie di mezzo. I tasti funzionano".into(),
+                        "comunque in entrambe.".into(),
+                    ],
+                ),
+                _ => (
+                    " BENVENUTO — 3 di 3: NIENTE ALLE TUE SPALLE ",
+                    vec![
+                        "Phosphor legge e basta. Non modifica i transcript e non".into(),
+                        "manda niente in rete di sua iniziativa.".into(),
+                        String::new(),
+                        "Tutto ciò che scrive un file, contatta un altro PC o".into(),
+                        "cancella qualcosa te lo dice PRIMA e aspetta un sì.".into(),
+                        String::new(),
+                        "Una cosa che vale la pena sapere subito: Claude Code".into(),
+                        "cancella i suoi transcript dopo 30 giorni, da solo e".into(),
+                        "senza cestino. Per tenerli vivi senza occupare spazio:".into(),
+                        "    phosphor vault on".into(),
+                        String::new(),
+                        "Buon lavoro. Questo giro non si ripresenta; l'aiuto  ?".into(),
+                        "c'è sempre.".into(),
+                    ],
+                ),
+            }
         };
         let last = page as usize + 1 >= Self::TOUR_PAGES;
         self.confirm = Some(Confirm {
@@ -1471,7 +1700,12 @@ impl App {
             lines,
             action: if last { Pending::TourDone } else { Pending::Tour(page + 1) },
             alts: Vec::new(),
-            buttons: Some(if last { ("INIZIA", "CHIUDI") } else { ("AVANTI", "SALTA") }),
+            buttons: Some(match (last, crate::lang::is_en()) {
+                (true, true) => ("START", "CLOSE"),
+                (true, false) => ("INIZIA", "CHIUDI"),
+                (false, true) => ("NEXT", "SKIP"),
+                (false, false) => ("AVANTI", "SALTA"),
+            }),
             cancel: Some(Pending::TourDone),
         });
     }
@@ -1513,7 +1747,7 @@ impl App {
             cfg.tour_done = true;
             crate::config::save(&self.base, &cfg);
         }
-        self.status = "pronto · ? per l'elenco completo, cliccabile".into();
+        self.status = t!("pronto · ? per l'elenco completo, cliccabile", "ready · ? for the full, clickable list").into();
     }
 
     /// Apply the answer to [`maybe_ask_retention`]. `days == 0` means "leave it
@@ -1550,7 +1784,7 @@ impl App {
         let s = match self.selected() {
             Some(s) if s.is_vaulted() => s.clone(),
             Some(_) => {
-                self.status = "V vale solo sulle righe ⛁ (quelle salvate dal vault)".into();
+                self.status = t!("V vale solo sulle righe ⛁ (quelle salvate dal vault)", "V only works on ⛁ rows (the ones saved by the vault)").into();
                 return;
             }
             None => return,
@@ -1558,12 +1792,17 @@ impl App {
         match crate::vault::restore(&self.base, &s) {
             Ok(p) => {
                 let cmd = if s.is_codex() { "codex resume" } else { "claude --resume" };
-                self.status = format!("✓ rimessa a posto ({}) — ora  {cmd}  la ritrova", clip(&p.to_string_lossy(), 40));
+                self.status = if crate::lang::is_en() { format!("✓ put back ({}) — now  {cmd}  finds it again", clip(&p.to_string_lossy(), 40)) } else { format!("✓ rimessa a posto ({}) — ora  {cmd}  la ritrova", clip(&p.to_string_lossy(), 40)) };
                 // It is a normal session again: rescan so the row loses its ⛁
                 // and becomes resumable in place.
                 self.rescan_now();
             }
-            Err(e) => self.status = format!("✗ ripristino fallito: {e}"),
+            Err(e) => {
+                self.status = t!(
+                    format!("✗ ripristino fallito: {e}"),
+                    format!("✗ restore failed: {e}"),
+                )
+            }
         }
     }
     /// Copy the selected session's transcript path to the system clipboard.
@@ -1596,7 +1835,7 @@ impl App {
             }
         }
         if live > 0 {
-            self.status = format!("⚠ {live} sessione/i live: chiudile prima di archiviare");
+            self.status = if crate::lang::is_en() { format!("⚠ {live} live session(s): close them before archiving") } else { format!("⚠ {live} sessione/i live: chiudile prima di archiviare") };
             return;
         }
         let lines = vec![
@@ -1606,7 +1845,7 @@ impl App {
             String::new(),
             format!("  {}  →  archived/", clip(&dir.display().to_string(), 52)),
         ];
-        self.confirm = Some(Confirm { title: " CONFERMA ARCHIVIA ".into(), lines, action: Pending::ArchiveProject { dir, name }, alts: Vec::new(), buttons: None, cancel: None });
+        self.confirm = Some(Confirm { title: t!(" CONFERMA ARCHIVIA ", " CONFIRM ARCHIVE ").into(), lines, action: Pending::ArchiveProject { dir, name }, alts: Vec::new(), buttons: None, cancel: None });
     }
     /// Perform the archive (already confirmed), then drop the project's sessions
     /// from the live view.
@@ -1617,9 +1856,14 @@ impl App {
                 self.apply_filter();
                 let n = self.view.len();
                 self.ts.select(if n > 0 { Some(0) } else { None });
-                self.status = format!("✓ «{}» archiviato (ripristina da CLI: --unarchive-project)", clip(&name, 24));
+                self.status = if crate::lang::is_en() { format!("✓ «{}» archived (restore from the CLI: --unarchive-project)", clip(&name, 24)) } else { format!("✓ «{}» archiviato (ripristina da CLI: --unarchive-project)", clip(&name, 24)) };
             }
-            Err(e) => self.status = format!("✗ archiviazione fallita: {e}"),
+            Err(e) => {
+                self.status = t!(
+                    format!("✗ archiviazione fallita: {e}"),
+                    format!("✗ archiving failed: {e}"),
+                )
+            }
         }
     }
     fn cmp(&self, a: usize, b: usize) -> std::cmp::Ordering {
@@ -1692,7 +1936,7 @@ impl App {
     /// supersedes the previous fetch via the generation counter.
     fn start_fleet_fetch(&mut self) {
         if self.remotes.is_empty() {
-            self.status = "nessun PC remoto: configura con  phosphor remote add <alias-ssh>".into();
+            self.status = t!("nessun PC remoto: configura con  phosphor remote add <alias-ssh>", "no remote PC: set one up with  phosphor remote add <ssh-alias>").into();
             return;
         }
         if self.dry { return; }
@@ -1710,7 +1954,7 @@ impl App {
                 }
             }
         });
-        self.status = format!("flotta: interrogo {} host via ssh…", self.fleet_expect);
+        self.status = if crate::lang::is_en() { format!("fleet: querying {} hosts over ssh…", self.fleet_expect) } else { format!("flotta: interrogo {} host via ssh…", self.fleet_expect) };
     }
     /// A fleet result arrived on the channel (drained by `run()` when no
     /// overlay is open). Stale generations (superseded by a newer F) are dropped.
@@ -1749,7 +1993,7 @@ impl App {
     fn rescan_now(&mut self) {
         if self.dry { return; }
         if self.scanning {
-            self.status = "sto gia' rileggendo…".into();
+            self.status = t!("sto gia' rileggendo…", "already re-reading…").into();
             return;
         }
         let tx = match self.scan_tx.clone() {
@@ -1763,14 +2007,14 @@ impl App {
                 if changed { cache::save(&self.base, &s); }
                 crate::add_recovered(&self.base, &mut s);
                 self.set_sessions(s);
-                self.status = "scan completato".into();
+                self.status = t!("scan completato", "scan complete").into();
                 return;
             }
         };
         let base = self.base.clone();
         let cache = self.cache.clone();
         self.scanning = true;
-        self.status = "rilettura in corso… (la finestra resta viva)".into();
+        self.status = t!("rilettura in corso… (la finestra resta viva)", "re-reading… (the window stays alive)").into();
         std::thread::spawn(move || {
             let (mut s, changed) = { let mut c = cache.lock().unwrap(); crate::scan_all(&base, &mut c) };
             live::annotate(&base, &mut s);
@@ -1795,7 +2039,7 @@ impl App {
             String::new(),
             "Nome con data/ora: nessun file esistente verrà sovrascritto.".into(),
         ];
-        self.confirm = Some(Confirm { title: " CONFERMA EXPORT ".into(), lines, action: Pending::Export { csv, json }, alts: Vec::new(), buttons: None, cancel: None });
+        self.confirm = Some(Confirm { title: t!(" CONFERMA EXPORT ", " CONFIRM EXPORT ").into(), lines, action: Pending::Export { csv, json }, alts: Vec::new(), buttons: None, cancel: None });
     }
     /// Actually write the export to the (already confirmed) paths.
     fn do_export(&mut self, csv_path: PathBuf, json_path: PathBuf) {
@@ -1878,7 +2122,7 @@ impl App {
                     "claude riprenderà LÀ, nella cartella giusta di quel PC.".into(),
                     "(serve phosphor+claude installati e ssh raggiungibile)".into(),
                 ];
-                self.confirm = Some(Confirm { title: " CONFERMA RIPRENDI REMOTO ".into(), lines, action: Pending::RemoteResume { host, id }, alts: Vec::new(), buttons: None, cancel: None });
+                self.confirm = Some(Confirm { title: t!(" CONFERMA RIPRENDI REMOTO ", " CONFIRM REMOTE RESUME ").into(), lines, action: Pending::RemoteResume { host, id }, alts: Vec::new(), buttons: None, cancel: None });
                 return;
             }
         }
@@ -1886,7 +2130,7 @@ impl App {
             Some(s) => (s.id.clone(), s.path.clone(), s.project_path.clone(), s.is_codex()),
             None => return,
         };
-        if recorded.is_empty() { self.status = "cwd mancante".into(); return; }
+        if recorded.is_empty() { self.status = t!("cwd mancante", "working directory missing").into(); return; }
         // The recorded cwd may be a subdir the user cd'd into; claude resumes
         // under the STARTUP cwd's folder (= the transcript's parent dir), so
         // correct it before resolving, else claude can't find the session.
@@ -1900,7 +2144,7 @@ impl App {
             None => {
                 // Path missing and no remap resolves it: let the user pick the
                 // local folder interactively (saved as a remap, then resume).
-                self.status = format!("cartella «{}» non trovata: scegli quella locale…", clip(&recorded, 36));
+                self.status = if crate::lang::is_en() { format!("folder «{}» not found: pick the local one…", clip(&recorded, 36)) } else { format!("cartella «{}» non trovata: scegli quella locale…", clip(&recorded, 36)) };
                 self.open_remap_picker(recorded);
                 return;
             }
@@ -1927,7 +2171,7 @@ impl App {
                 "remap applicato → uso --fork-session (sessione derivata).".to_string()
             });
         }
-        self.confirm = Some(Confirm { title: " CONFERMA RIPRENDI ".into(), lines, action: Pending::Resume { id, cwd, fork, codex }, alts: Vec::new(), buttons: None, cancel: None });
+        self.confirm = Some(Confirm { title: t!(" CONFERMA RIPRENDI ", " CONFIRM RESUME ").into(), lines, action: Pending::Resume { id, cwd, fork, codex }, alts: Vec::new(), buttons: None, cancel: None });
     }
     /// Actually spawn the resume terminal (already confirmed).
     fn do_resume_now(&mut self, id: String, cwd: String, fork: bool, codex: bool) {
@@ -1964,7 +2208,7 @@ impl App {
             String::new(),
             "File NUOVO con data nel nome: non sovrascrive nulla.".into(),
         ];
-        self.confirm = Some(Confirm { title: " CONFERMA EXPORT PORTABILE ".into(), lines, action: Pending::ExportBundle { out }, alts: Vec::new(), buttons: None, cancel: None });
+        self.confirm = Some(Confirm { title: t!(" CONFERMA EXPORT PORTABILE ", " CONFIRM PORTABLE EXPORT ").into(), lines, action: Pending::ExportBundle { out }, alts: Vec::new(), buttons: None, cancel: None });
     }
     /// Actually build and write the bundle (already confirmed). With a
     /// multi-selection active it bundles just those; else the whole current view.
@@ -2013,7 +2257,7 @@ impl App {
             }
         }
         if live > 0 {
-            self.status = format!("⚠ {live} sessione/i live nel progetto: chiudile prima di cancellare");
+            self.status = if crate::lang::is_en() { format!("⚠ {live} live session(s) in the project: close them before deleting") } else { format!("⚠ {live} sessione/i live nel progetto: chiudile prima di cancellare") };
             return;
         }
         self.delproj = Some(DelProj { dir, name, count, bytes, typed: String::new(), phase: 0, exported: false });
@@ -2032,9 +2276,9 @@ impl App {
         match crate::write_new(&out, &bytes) {
             Ok(()) => {
                 if let Some(d) = &mut self.delproj { d.exported = true; }
-                self.status = format!("✓ backup: {}", out.display());
+                self.status = if crate::lang::is_en() { format!("✓ backup: {}", out.display()) } else { format!("✓ backup: {}", out.display()) };
             }
-            Err(_) => self.status = "✗ backup fallito (file già esistente?)".into(),
+            Err(_) => self.status = t!("✗ backup fallito (file già esistente?)", "✗ backup failed (file already there?)").into(),
         }
     }
     /// Phase 1: the user typed a name and pressed Enter. Delete the project ONLY
@@ -2043,18 +2287,18 @@ impl App {
         let (dir, name) = match &self.delproj { Some(d) => (d.dir.clone(), d.name.clone()), None => return };
         let typed = self.delproj.as_ref().map(|d| d.typed.trim().to_string()).unwrap_or_default();
         if typed != name {
-            self.status = "il nome non corrisponde: nulla è stato cancellato".into();
+            self.status = t!("il nome non corrisponde: nulla è stato cancellato", "the name does not match: nothing was deleted").into();
             return;
         }
         let live = self.all.iter().any(|s| Path::new(&s.path).parent() == Some(dir.as_path()) && (s.live == "running" || s.live == "idle"));
         if live {
             self.delproj = None;
-            self.status = "⚠ una sessione è diventata live: annullato".into();
+            self.status = t!("⚠ una sessione è diventata live: annullato", "⚠ a session went live: cancelled").into();
             return;
         }
         if self.dry {
             self.delproj = None;
-            self.status = "(dry) progetto non cancellato".into();
+            self.status = t!("(dry) progetto non cancellato", "(dry) project not deleted").into();
             return;
         }
         match crate::delete_project_dir(&self.base, &dir) {
@@ -2063,28 +2307,31 @@ impl App {
                 self.apply_filter();
                 let n = self.view.len();
                 self.ts.select(if n > 0 { Some(0) } else { None });
-                self.status = format!("✓ progetto «{}» cancellato", clip(&name, 30));
+                self.status = if crate::lang::is_en() { format!("✓ project «{}» deleted", clip(&name, 30)) } else { format!("✓ progetto «{}» cancellato", clip(&name, 30)) };
             }
-            Err(e) => self.status = format!("✗ cancellazione fallita: {e}"),
+            Err(e) => {
+                self.status = t!(
+                    format!("✗ cancellazione fallita: {e}"),
+                    format!("✗ deletion failed: {e}"),
+                )
+            }
         }
         self.delproj = None;
     }
-    /// Open the ASCII file picker to choose a `.phx` bundle to import. Starts on
-    /// the Desktop (where exports land), then on the `.claude` dir.
     /// Open the in-app transcript reader for the selected session.
     fn open_reader(&mut self) {
-        if self.selected_is_remote("lettura transcript") { return; }
+        if self.selected_is_remote(t!("lettura transcript", "transcript reading")) { return; }
         let s = match self.selected() { Some(s) => s, None => return };
         let title = s.title.replace('\n', " ");
         let s = s.clone();
         let turns = crate::turns_of(&self.base, &s);
         if turns.is_empty() {
-            self.status = "nessun messaggio leggibile in questa sessione".into();
+            self.status = t!("nessun messaggio leggibile in questa sessione", "no readable message in this session").into();
             return;
         }
         let n = turns.len();
         self.reader = Some(Reader { title, turns, scroll: 0, target_turn: None });
-        self.status = format!("lettura: {} messaggi", n);
+        self.status = if crate::lang::is_en() { format!("reading: {} messages", n) } else { format!("lettura: {} messaggi", n) };
     }
     /// Open the reader for a session by index, positioned at a given turn (used
     /// by global content search to jump straight to the match).
@@ -2094,7 +2341,7 @@ impl App {
         let s = s.clone();
         let turns = crate::turns_of(&self.base, &s);
         if turns.is_empty() {
-            self.status = "nessun messaggio leggibile in questa sessione".into();
+            self.status = t!("nessun messaggio leggibile in questa sessione", "no readable message in this session").into();
             return;
         }
         self.reader = Some(Reader { title, turns, scroll: 0, target_turn: Some(turn) });
@@ -2145,7 +2392,7 @@ impl App {
             }
         }
         if let Some(g) = &mut self.gsearch {
-            self.status = format!("«{}»: {} risultati", g.query.trim(), results.len());
+            self.status = if crate::lang::is_en() { format!("«{}»: {} results", g.query.trim(), results.len()) } else { format!("«{}»: {} risultati", g.query.trim(), results.len()) };
             g.results = results;
             g.sel = 0;
             g.scroll = 0;
@@ -2175,6 +2422,8 @@ impl App {
             .filter(|d| d.is_dir())
             .unwrap_or_else(|| self.base.clone())
     }
+    /// Open the ASCII file picker to choose a `.phx` bundle to import. Starts on
+    /// the Desktop (where exports land), then on the `.claude` dir.
     fn open_picker(&mut self) {
         let start = self.desktop_or_base();
         self.picker_show(start, PickPurpose::Import);
@@ -2242,7 +2491,7 @@ impl App {
         self.remaps.push((recorded.clone(), dir_s.clone()));
         self.persist_config();
         self.picker = None;
-        self.status = format!("remap salvato: {} → {}", clip(&recorded, 22), clip(&dir_s, 22));
+        self.status = if crate::lang::is_en() { format!("remap saved: {} → {}", clip(&recorded, 22), clip(&dir_s, 22)) } else { format!("remap salvato: {} → {}", clip(&recorded, 22), clip(&dir_s, 22)) };
         self.request_resume();
     }
     fn persist_config(&self) {
@@ -2265,14 +2514,14 @@ impl App {
     /// The import only ADDS missing files — it never overwrites or deletes.
     fn request_import_path(&mut self, src: PathBuf) {
         if self.dry { return; }
-        let data = match std::fs::read(&src) { Ok(d) => d, Err(_) => { self.status = "impossibile leggere il .phx".into(); return; } };
-        let parsed = match crate::bundle::inspect(&data) { Ok(p) => p, Err(e) => { self.status = format!("bundle non valido: {e}"); return; } };
+        let data = match std::fs::read(&src) { Ok(d) => d, Err(_) => { self.status = t!("impossibile leggere il .phx", "cannot read the .phx").into(); return; } };
+        let parsed = match crate::bundle::inspect(&data) { Ok(p) => p, Err(e) => { self.status = if crate::lang::is_en() { format!("invalid bundle: {e}") } else { format!("bundle non valido: {e}") }; return; } };
         // Apply the persistent pathRemaps so a bundle from another PC lands under
         // THIS machine's project paths (natively resumable). Same remaps the `r`
         // resume uses.
         let plan = crate::bundle::apply_remapped(&self.base, &data, &parsed, true, &self.remaps);
         if plan.added == 0 {
-            self.status = format!("{}: niente da aggiungere (già presente)", file_name(&src));
+            self.status = if crate::lang::is_en() { format!("{}: nothing to add (already there)", file_name(&src)) } else { format!("{}: niente da aggiungere (già presente)", file_name(&src)) };
             return;
         }
         let mb = plan.bytes as f64 / 1_048_576.0;
@@ -2297,15 +2546,15 @@ impl App {
         }
         lines.push(String::new());
         lines.push("Solo aggiunta: non sovrascrive, non modifica, non elimina.".into());
-        self.confirm = Some(Confirm { title: " CONFERMA IMPORT ".into(), lines, action: Pending::ImportBundle { src }, alts: Vec::new(), buttons: None, cancel: None });
+        self.confirm = Some(Confirm { title: t!(" CONFERMA IMPORT ", " CONFIRM IMPORT ").into(), lines, action: Pending::ImportBundle { src }, alts: Vec::new(), buttons: None, cancel: None });
     }
     /// Actually import the bundle (already confirmed).
     fn do_import_bundle(&mut self, src: PathBuf) {
-        let data = match std::fs::read(&src) { Ok(d) => d, Err(_) => { self.status = "impossibile leggere il .phx".into(); return; } };
-        let parsed = match crate::bundle::inspect(&data) { Ok(p) => p, Err(e) => { self.status = format!("bundle non valido: {e}"); return; } };
+        let data = match std::fs::read(&src) { Ok(d) => d, Err(_) => { self.status = t!("impossibile leggere il .phx", "cannot read the .phx").into(); return; } };
+        let parsed = match crate::bundle::inspect(&data) { Ok(p) => p, Err(e) => { self.status = if crate::lang::is_en() { format!("invalid bundle: {e}") } else { format!("bundle non valido: {e}") }; return; } };
         let _ = std::fs::create_dir_all(self.base.join("projects"));
         let rep = crate::bundle::apply_remapped(&self.base, &data, &parsed, false, &self.remaps);
-        self.status = format!("✓ importati {} file, {} saltati", rep.added, rep.skipped);
+        self.status = if crate::lang::is_en() { format!("✓ imported {} files, {} skipped", rep.added, rep.skipped) } else { format!("✓ importati {} file, {} saltati", rep.added, rep.skipped) };
         self.rescan_now();
     }
     /// Run a confirmed pending action.
@@ -2448,7 +2697,7 @@ pub fn selftest(base: PathBuf, all: Vec<Session>, cache: Arc<Mutex<HashMap<Strin
             app.searching = false;
             // confirmation modal: render + flex its key/mouse handlers (dry: no I/O)
             app.confirm = Some(Confirm {
-                title: " CONFERMA EXPORT ".into(),
+                title: t!(" CONFERMA EXPORT ", " CONFIRM EXPORT ").into(),
                 lines: vec!["riga di prova".into(), "C:/un/percorso/molto/lungo/file.csv".into()],
                 action: Pending::Export { csv: PathBuf::from("x.csv"), json: PathBuf::from("x.json") },
                 alts: Vec::new(), buttons: None, cancel: None,
@@ -2736,7 +2985,7 @@ pub fn run(
                     // Whoever sent it, the window is current again.
                     if app.scanning {
                         app.scanning = false;
-                        app.status = "scan completato".into();
+                        app.status = t!("scan completato", "scan complete").into();
                     }
                 }
                 while let Ok((gen, alias, res)) = frx.try_recv() {
@@ -2773,7 +3022,7 @@ pub fn run(
 
 fn set_theme(app: &mut App, idx: usize) {
     app.theme_idx = idx % THEME_COUNT;
-    app.status = format!("tema: {}", THEME_NAMES[app.theme_idx]);
+    app.status = if crate::lang::is_en() { format!("theme: {}", THEME_NAMES[app.theme_idx]) } else { format!("tema: {}", THEME_NAMES[app.theme_idx]) };
 }
 
 /// Dispatch a shortcut/chip action. Returns true if the app should quit.
@@ -2783,7 +3032,7 @@ fn dispatch(app: &mut App, code: u16) -> bool {
         A_DOWN => app.move_sel(3),
         A_SEARCH => { if app.tab == 0 { app.searching = true; } }
         A_FILTER => { app.state_filter = (app.state_filter + 1) % 5; app.apply_filter(); }
-        A_SORTCOL => { app.sort_col = (app.sort_col + 1) % SORTS.len(); app.apply_filter(); }
+        A_SORTCOL => { app.sort_col = (app.sort_col + 1) % sorts().len(); app.apply_filter(); }
         A_SORTDIR => { app.sort_desc = !app.sort_desc; app.apply_filter(); }
         A_METRIC => app.metric = (app.metric + 1) % 3,
         A_THEME_NEXT => set_theme(app, app.theme_idx + 1),
@@ -2810,6 +3059,7 @@ fn dispatch(app: &mut App, code: u16) -> bool {
         A_VAULT_RESTORE => app.request_vault_restore(),
         A_WRAPPED => app.request_wrapped(),
         A_MOUSE_MODE => app.toggle_mouse_mode(),
+        A_LANG => app.toggle_lang(),
         A_HELP => { app.help = true; app.help_scroll = 0; }
         A_TAB => app.tab = (app.tab + 1) % 3,
         A_PIXEL => { app.pixel = !app.pixel; app.status = if app.pixel { "pixel ON".into() } else { "pixel OFF".into() }; }
@@ -2843,7 +3093,7 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
             }
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') => {
                 app.confirm = None;
-                app.status = "annullato".into();
+                app.status = t!("annullato", "cancelled").into();
             }
             _ => {}
         }
@@ -2855,7 +3105,7 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
             KeyCode::Up | KeyCode::Char('k') => app.menu_move(-1),
             KeyCode::Down | KeyCode::Char('j') => app.menu_move(1),
             KeyCode::Enter => return app.menu_activate(),
-            KeyCode::Esc | KeyCode::Char('q') => { app.menu = None; app.status = "menù chiuso".into(); }
+            KeyCode::Esc | KeyCode::Char('q') => { app.menu = None; app.status = t!("menù chiuso", "menu closed").into(); }
             // The letters shown on each row are live accelerators: jump to that
             // item and run it. (No item uses j/k/q, so navigation stays intact.)
             KeyCode::Char(c) => {
@@ -2880,7 +3130,7 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
             KeyCode::End => app.picker_move(i64::MAX / 2),
             KeyCode::Enter | KeyCode::Right => app.picker_enter(),
             KeyCode::Left | KeyCode::Backspace => app.picker_parent(),
-            KeyCode::Esc | KeyCode::Char('q') => { app.picker = None; app.status = "annullato".into(); }
+            KeyCode::Esc | KeyCode::Char('q') => { app.picker = None; app.status = t!("annullato", "cancelled").into(); }
             _ => {}
         }
         return false;
@@ -2959,7 +3209,7 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
     }
     if app.note_editing {
         match code {
-            KeyCode::Esc => { app.note_editing = false; app.note_is_alias = false; app.note_buf.clear(); app.status = "annullato".into(); }
+            KeyCode::Esc => { app.note_editing = false; app.note_is_alias = false; app.note_buf.clear(); app.status = t!("annullato", "cancelled").into(); }
             KeyCode::Enter => app.save_note(),
             KeyCode::Backspace => { app.note_buf.pop(); }
             KeyCode::Char(c) => { app.note_buf.push(c); }
@@ -2971,7 +3221,7 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
     if app.delproj.is_some() {
         let phase = app.delproj.as_ref().map(|d| d.phase).unwrap_or(0);
         match code {
-            KeyCode::Esc => { app.delproj = None; app.status = "cancellazione annullata".into(); }
+            KeyCode::Esc => { app.delproj = None; app.status = t!("cancellazione annullata", "deletion cancelled").into(); }
             _ if phase == 0 => match code {
                 // Phase 0: warn + offer a .phx backup, then step to type-to-confirm.
                 KeyCode::Char('e') | KeyCode::Char('E') => app.delproj_export(),
@@ -3037,8 +3287,9 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
         KeyCode::Char('F') => app.start_fleet_fetch(),
         KeyCode::Char('V') => { if app.tab == 0 && app.selected().is_some() { app.restore_from_vault(); } }
         KeyCode::Char('W') => app.make_wrapped(),
+        KeyCode::Char('L') | KeyCode::Char('l') => app.toggle_lang(),
         KeyCode::Char('X') => { if app.tab == 0 { app.request_delete_marked(); } }
-        KeyCode::Esc => { if !app.marked.is_empty() { app.marked.clear(); app.status = "selezione azzerata".into(); } }
+        KeyCode::Esc => { if !app.marked.is_empty() { app.marked.clear(); app.status = t!("selezione azzerata", "selection cleared").into(); } }
         KeyCode::Char('g') => app.open_gsearch(),
         KeyCode::Char('a') => { if app.tab == 0 && app.selected().is_some() { app.open_agents(); } }
         KeyCode::Char('/') => { if app.tab == 0 { app.searching = true; } }
@@ -3051,7 +3302,7 @@ fn handle_key(app: &mut App, code: KeyCode, mods: KeyModifiers) -> bool {
         KeyCode::Char('p') => { app.pixel = !app.pixel; app.status = if app.pixel { "pixel ON".into() } else { "pixel OFF".into() }; }
         KeyCode::Char('m') => app.metric = (app.metric + 1) % 3,
         KeyCode::Char('f') => { app.state_filter = (app.state_filter + 1) % 5; app.apply_filter(); }
-        KeyCode::Char('o') => { app.sort_col = (app.sort_col + 1) % SORTS.len(); app.apply_filter(); }
+        KeyCode::Char('o') => { app.sort_col = (app.sort_col + 1) % sorts().len(); app.apply_filter(); }
         KeyCode::Char('s') => { app.sort_desc = !app.sort_desc; app.apply_filter(); }
         KeyCode::Char('R') => app.rescan_now(),
         KeyCode::Char('A') => { if app.tab == 0 { app.toggle_all_chains(); } }
@@ -3105,7 +3356,7 @@ fn handle_mouse(app: &mut App, m: event::MouseEvent) -> bool {
                     // scelta non verrebbe ricordata.
                     match app.confirm.take().and_then(|c| c.cancel) {
                         Some(p) => app.run_pending(p),
-                        None => app.status = "annullato".into(),
+                        None => app.status = t!("annullato", "cancelled").into(),
                     }
                 }
                 _ => {}
@@ -3124,10 +3375,10 @@ fn handle_mouse(app: &mut App, m: event::MouseEvent) -> bool {
                 for (i, r) in app.rect_menu_items.iter().enumerate() { if hit(*r, col, row) { hit_item = Some(i); break; } }
                 match hit_item {
                     Some(i) => { if let Some(mm) = &mut app.menu { mm.sel = i; } return app.menu_activate(); }
-                    None => { app.menu = None; app.status = "menù chiuso".into(); }
+                    None => { app.menu = None; app.status = t!("menù chiuso", "menu closed").into(); }
                 }
             }
-            MouseEventKind::Down(MouseButton::Right) => { app.menu = None; app.status = "menù chiuso".into(); }
+            MouseEventKind::Down(MouseButton::Right) => { app.menu = None; app.status = t!("menù chiuso", "menu closed").into(); }
             _ => {}
         }
         return false;
@@ -3136,7 +3387,7 @@ fn handle_mouse(app: &mut App, m: event::MouseEvent) -> bool {
     if app.picker.is_some() {
         if clicked_outside(app, &m) {
             app.picker = None;
-            app.status = "annullato".into();
+            app.status = t!("annullato", "cancelled").into();
             return false;
         }
         match m.kind {
@@ -3380,7 +3631,8 @@ fn ui(f: &mut Frame, app: &mut App) {
     let off = (t / 90_000) as usize; // advance one pill every 90s
     let tip_rows = h.saturating_sub(1).max(1);
     let mut tlines: Vec<Line> = (0..tip_rows).map(|i| {
-        let tip = TIPS[(off + i) % TIPS.len()];
+        let tips = tips();
+        let tip = tips[(off + i) % tips.len()];
         let style = if i == 0 {
             Style::default().fg(th.fg).add_modifier(Modifier::BOLD)
         } else {
@@ -3660,14 +3912,14 @@ fn stats_line(app: &App, th: &Theme) -> Paragraph<'static> {
     ];
     let div = || Span::styled("║ ", Style::default().fg(th.dim));
     let mut sp = vec![Span::styled(" ▐ ", Style::default().fg(th.accent))];
-    sp.extend(mk(app.all.len().to_string(), "sess")); sp.push(div());
-    sp.extend(mk(projs.to_string(), "prog")); sp.push(div());
+    sp.extend(mk(app.all.len().to_string(), t!("sess", "sess"))); sp.push(div());
+    sp.extend(mk(projs.to_string(), t!("prog", "proj"))); sp.push(div());
     sp.extend(mk(run.to_string(), "live")); sp.extend(mk(idle.to_string(), "idle")); sp.push(div());
-    sp.extend(mk(fmt_tok(tok), "tok")); sp.extend(mk(fmt_usd(costtot), "costo")); sp.push(div());
+    sp.extend(mk(fmt_tok(tok), "tok")); sp.extend(mk(fmt_usd(costtot), t!("costo", "cost"))); sp.push(div());
     // last-30-days spend + monthly budget
     let now = now_ms();
     let month: f64 = app.all.iter().filter(|s| now.saturating_sub(s.mtime_ms) < 30 * 86_400_000).map(|s| cost(s, &app.prices)).sum();
-    sp.extend(mk(fmt_usd(month), "30g"));
+    sp.extend(mk(fmt_usd(month), t!("30g", "30d")));
     if app.budget > 0.0 {
         let pct = (month / app.budget * 100.0).round() as u64;
         let col = if month > app.budget { th.idle } else { th.run };
@@ -3679,8 +3931,8 @@ fn stats_line(app: &App, th: &Theme) -> Paragraph<'static> {
     // "am I heavy this window" (the `~` marks it as an estimate).
     let tok5: u64 = app.all.iter().filter(|s| now.saturating_sub(s.mtime_ms) < 5 * 3_600_000).map(tok_of).sum();
     let tok7: u64 = app.all.iter().filter(|s| now.saturating_sub(s.mtime_ms) < 7 * 86_400_000).map(tok_of).sum();
-    sp.extend(mk(format!("~{}", fmt_tok(tok5)), "uso 5h"));
-    sp.extend(mk(format!("~{}", fmt_tok(tok7)), "7g"));
+    sp.extend(mk(format!("~{}", fmt_tok(tok5)), t!("uso 5h", "used 5h")));
+    sp.extend(mk(format!("~{}", fmt_tok(tok7)), t!("7g", "7d")));
     sp.push(div());
     // Plan + limit-window reset (read-only, from ~/.claude.json). Official 5h/
     // weekly percentages aren't stored locally, so we only show plan + reset.
@@ -3701,23 +3953,35 @@ fn stats_line(app: &App, th: &Theme) -> Paragraph<'static> {
 
 
 fn footer(app: &App, th: &Theme) -> Paragraph<'static> {
-    let states = ["tutte", "live", "idle", "fine", "★ preferiti"];
-    let metrics = ["costo", "token", "sessioni"];
+    let states = t!(
+        ["tutte", "live", "idle", "fine", "★ preferiti"],
+        ["all", "live", "idle", "done", "★ favorites"],
+    );
+    let metrics = t!(["costo", "token", "sessioni"], ["cost", "tokens", "sessions"]);
     let ctx: String = if app.confirm.is_some() {
-        "premi  s  per confermare · Esc per annullare".into()
+        t!("premi  s  per confermare · Esc per annullare", "press  s  to confirm · Esc to cancel").into()
     } else if app.note_editing {
-        let field = if app.note_is_alias { "alias (titolo mostrato)" } else { "nota" };
-        format!("{field}: {}_   (Invio salva · Esc annulla · vuoto = rimuove)", app.note_buf)
+        let field = if app.note_is_alias { t!("alias (titolo mostrato)", "alias (shown title)") } else { t!("nota", "note") };
+        t!(
+            format!("{field}: {}_   (Invio salva · Esc annulla · vuoto = rimuove)", app.note_buf),
+            format!("{field}: {}_   (Enter saves · Esc cancels · empty = removes)", app.note_buf),
+        )
     } else if app.searching {
         if app.search.is_empty() {
-            "cerca: _   (testo libero · filtri: project: model: file: tool: agent: host: after: before:)".into()
+            t!(
+                "cerca: _   (testo libero · filtri: project: model: file: tool: agent: host: after: before:)",
+                "search: _   (free text · filters: project: model: file: tool: agent: host: after: before:)",
+            ).into()
         } else {
-            format!("cerca: {}_", app.search)
+            t!(format!("cerca: {}_", app.search), format!("search: {}_", app.search))
         }
     } else if app.detail || app.show_agents || app.help {
-        "premi Esc per chiudere".into()
+        t!("premi Esc per chiudere", "press Esc to close").into()
     } else if app.tab == 0 {
-        format!("ordina {}{} · filtro {}", SORTS[app.sort_col], if app.sort_desc { "▼" } else { "▲" }, states[app.state_filter as usize])
+        t!(
+            format!("ordina {}{} · filtro {}", sorts()[app.sort_col], if app.sort_desc { "▼" } else { "▲" }, states[app.state_filter as usize]),
+            format!("sort {}{} · filter {}", sorts()[app.sort_col], if app.sort_desc { "▼" } else { "▲" }, states[app.state_filter as usize]),
+        )
     } else {
         format!("metrica {}", metrics[app.metric as usize])
     };
@@ -3731,7 +3995,10 @@ fn render_sessions(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
     app.rect_table = area;
     let widths = sess_widths();
 
-    let headers = ["", "PROGETTO", "TITOLO", "MSG", "TOKEN", "~COSTO", "ENERGIA", "ACQUA", "AG", "DIMENS.", "DATA", "MODELLO"];
+    let headers = t!(
+        ["", "PROGETTO", "TITOLO", "MSG", "TOKEN", "~COSTO", "ENERGIA", "ACQUA", "AG", "DIMENS.", "DATA", "MODELLO"],
+        ["", "PROJECT", "TITLE", "MSG", "TOKENS", "~COST", "ENERGY", "WATER", "AG", "SIZE", "DATE", "MODEL"],
+    );
     let header = Row::new(headers.iter().enumerate().map(|(i, h)| {
         let mut st = Style::default().fg(th.dim).add_modifier(Modifier::BOLD);
         if COL_SORT[i] == Some(app.sort_col) {
@@ -3809,7 +4076,11 @@ fn render_sessions(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
         .fold((0.0, 0.0), |(e, w), (de, dw)| (e + de, w + dw));
     let hidden = app.view_all.len().saturating_sub(app.view.len());
     let folded = if hidden > 0 { format!(" · {} riprese compresse", hidden) } else { String::new() };
-    let title = format!(" {} sessioni{} · {} · ~{} ~{} · ordina: {}{} ", app.view_all.len(), folded, fmt_size(total_size), fmt_wh(twh), fmt_ml(tml), SORTS[app.sort_col], if app.sort_desc { "▼" } else { "▲" });
+    let arrow = if app.sort_desc { "▼" } else { "▲" };
+    let title = t!(
+        format!(" {} sessioni{} · {} · ~{} ~{} · ordina: {}{} ", app.view_all.len(), folded, fmt_size(total_size), fmt_wh(twh), fmt_ml(tml), sorts()[app.sort_col], arrow),
+        format!(" {} sessions{} · {} · ~{} ~{} · sort: {}{} ", app.view_all.len(), folded, fmt_size(total_size), fmt_wh(twh), fmt_ml(tml), sorts()[app.sort_col], arrow),
+    );
     let table = Table::new(rows, widths)
         .header(header)
         .column_spacing(1)
@@ -4566,6 +4837,19 @@ mod tree_tests {
         a
     }
 
+    /// La lingua e' un byte globale e i test girano in parallelo: chi la tocca
+    /// prende questo lucchetto e la rimette com'era. Senza, un test che passa
+    /// all'inglese fa fallire a caso quello che sta controllando un titolo
+    /// italiano — il tipo di rottura che si presenta una volta su venti e fa
+    /// perdere un pomeriggio.
+    static LANG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lang_guard(en: bool) -> std::sync::MutexGuard<'static, ()> {
+        let g = LANG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        crate::lang::set_en(en);
+        g
+    }
+
     // id of the session at visible row `vp`
     fn id_at(app: &App, vp: usize) -> &str { &app.all[app.view[vp]].id }
 
@@ -4594,6 +4878,7 @@ mod tree_tests {
 
     #[test]
     fn every_chip_drawn_in_the_bar_can_be_clicked() {
+        let _lock = lang_guard(false);
         // Il difetto che questo chiude: i rettangoli cliccabili vivono due
         // volte — il disegno li produce, il mouse li rilegge da un campo di
         // App. Se chi aggiunge un bottone si dimentica di registrarlo, il
@@ -4627,6 +4912,7 @@ mod tree_tests {
 
     #[test]
     fn the_tour_shows_once_clicks_through_and_never_comes_back() {
+        let _lock = lang_guard(false);
         let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
         app.dry = false;
         app.base = std::env::temp_dir().join(format!("phosphor-tour-{}", std::process::id()));
@@ -4681,6 +4967,7 @@ mod tree_tests {
         // Il secondo bottone qui non è «annulla»: è «salta». Se annullasse e
         // basta, il giro tornerebbe al prossimo avvio — cioè la risposta
         // dell'utente verrebbe ignorata.
+        let _lock = lang_guard(false);
         let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
         app.dry = false;
         app.base = std::env::temp_dir().join(format!("phosphor-tour-skip-{}", std::process::id()));
@@ -4733,11 +5020,17 @@ mod tree_tests {
         // al bordo destro e buttava via TUTTO l'ultimo gruppo: aiuto, tema,
         // pixel e l'interruttore del mouse. Un difetto che non si nota perche'
         // la prova e' un'assenza: non c'e' niente di rotto da guardare.
+        let _lock = lang_guard(false);
         let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
+        // Tutte e due le lingue: le etichette inglesi hanno lunghezze diverse, e
+        // una barra che sta in piedi in italiano puo' perdere una voce in
+        // inglese senza che nessuno se ne accorga.
+        for en in [false, true] {
+        crate::lang::set_en(en);
         for width in [200u16, 160, 120, 100, 80] {
             let (rows, placed) = place_chips(&app, width);
             let wanted = shortcut_chips(&app).iter().flatten().count();
-            assert_eq!(placed.len(), wanted, "a {width} colonne manca qualche voce");
+            assert_eq!(placed.len(), wanted, "a {width} colonne manca qualche voce (en={en})");
             assert!(rows <= BAR_MAX_LINES, "a {width} colonne la barra e' alta {rows}");
             // Nessun chip sborda, su nessuna delle righe.
             for p in &placed {
@@ -4751,10 +5044,13 @@ mod tree_tests {
         for p in &placed {
             assert!(p.x + p.w < 40);
         }
+        }
+        crate::lang::set_en(false);
     }
 
     #[test]
     fn clicking_the_words_in_the_bar_does_the_thing() {
+        let _lock = lang_guard(false);
         let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
         app.tab = 0;
         draw(&mut app);
@@ -4787,6 +5083,7 @@ mod tree_tests {
 
     #[test]
     fn clicking_a_help_row_runs_it_and_gets_out_of_the_way() {
+        let _lock = lang_guard(false);
         let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
         app.ts.select(Some(0));
         app.help = true;
@@ -4968,6 +5265,51 @@ mod tree_tests {
     }
 
     #[test]
+    fn the_language_switch_is_one_key_one_chip_and_it_is_remembered() {
+        // Il tasto e il chip stanno bene in vista perche' chi ne ha bisogno e'
+        // proprio chi non capisce quello che sta leggendo: mandarlo a cercare
+        // una voce in un file di configurazione scritto nella lingua sbagliata
+        // sarebbe una barzelletta.
+        let _lock = lang_guard(false);
+        let mut app = app_with(vec![sess("aaa", "p", "C:/p", "titolo", 1000)]);
+        app.dry = false;
+        app.base = std::env::temp_dir().join(format!("phosphor-lang-{}", std::process::id()));
+        std::fs::create_dir_all(&app.base).unwrap();
+
+        // Il chip c'e' in tutte e due le lingue e in tutte e due le viste.
+        for tab in [0usize, 1] {
+            app.tab = tab;
+            draw(&mut app);
+            let r = chip_rect(&app, A_LANG);
+            assert!(r.width > 0, "manca il chip della lingua (tab {tab})");
+        }
+        // Un click lo cambia, e la scelta finisce su disco.
+        app.tab = 0;
+        draw(&mut app);
+        let r = chip_rect(&app, A_LANG);
+        click_middle(&mut app, r);
+        assert!(crate::lang::is_en(), "il click accende l'inglese");
+        assert_eq!(crate::config::load(&app.base).lang, "en", "e se lo ricorda");
+
+        // L'interfaccia cambia davvero, non solo il byte.
+        assert!(
+            shortcut_chips(&app).iter().flatten().any(|(_, l, _)| *l == "help"),
+            "la barra deve parlare inglese"
+        );
+        let en_help = help::lines(&theme(0)).len();
+        assert!(en_help > 50, "l'aiuto inglese esiste ed e' lungo");
+
+        // E il tasto L fa lo stesso, in tutte e due le direzioni.
+        let _ = handle_key(&mut app, KeyCode::Char('L'), KeyModifiers::empty());
+        assert!(!crate::lang::is_en());
+        assert_eq!(crate::config::load(&app.base).lang, "it");
+        assert!(shortcut_chips(&app).iter().flatten().any(|(_, l, _)| *l == "aiuto"));
+
+        std::fs::remove_dir_all(&app.base).ok();
+        crate::lang::set_en(false);
+    }
+
+    #[test]
     fn the_verses_fit_the_box_and_still_name_the_key() {
         // Le pillole sono in versi, ma restano aiuto: se una viene tagliata a
         // metà perde proprio la fine, dove di solito sta la cosa da fare. E un
@@ -4977,7 +5319,7 @@ mod tree_tests {
         // 51 colonne e' la larghezza del riquadro su un terminale da 120 (vedi
         // `clip` in render_hero): il logo ne prende 52, la colonna di destra 13.
         const W: usize = 51;
-        for t in TIPS {
+        for t in TIPS.iter().chain(TIPS_EN.iter()) {
             assert!(
                 t.chars().count() <= W,
                 "«{t}» e' lungo {} caratteri: verrebbe tagliato",
@@ -4985,21 +5327,24 @@ mod tree_tests {
             );
             assert!(!t.trim().is_empty());
         }
-        // I tasti e i comandi che i versi promettono devono esistere davvero.
-        let all = TIPS.join("\n");
-        for token in [
-            "  v  ", "  /  ", "  f  ", "  r  ", "  a  ", "  e  ", "  x  ", "  i  ", "  p  ",
-            "  m  ", "  R  ", "  ?  ", "  q  ", "  A  ", "  W  ", "  V  ", "  F  ", "  H  ",
-            "phosphor cost", "phosphor find", "phosphor --web", "vault on",
-        ] {
-            assert!(all.contains(token), "nessun verso insegna «{}»", token.trim());
+        // Le due lingue devono insegnare gli stessi tasti: un verso inglese che
+        // dimenticasse  V  lascerebbe un comando senza nessuno che lo nomini.
+        for (name, set) in [("it", TIPS), ("en", TIPS_EN)] {
+            let all = set.join("\n");
+            for token in [
+                "  v  ", "  /  ", "  f  ", "  r  ", "  a  ", "  e  ", "  x  ", "  i  ", "  p  ",
+                "  m  ", "  R  ", "  ?  ", "  q  ", "  A  ", "  W  ", "  V  ", "  F  ", "  H  ",
+                "  L  ", "phosphor cost", "phosphor find", "phosphor --web", "vault on",
+            ] {
+                assert!(all.contains(token), "[{name}] nessun verso insegna «{}»", token.trim());
+            }
+            // Nessun doppione: settanta versi si controllano male a occhio.
+            let mut seen: Vec<&str> = set.to_vec();
+            seen.sort_unstable();
+            let n = seen.len();
+            seen.dedup();
+            assert_eq!(seen.len(), n, "[{name}] c'e' un verso ripetuto");
         }
-        // Nessun doppione: sessanta versi si controllano male a occhio.
-        let mut seen: Vec<&str> = TIPS.to_vec();
-        seen.sort_unstable();
-        let n = seen.len();
-        seen.dedup();
-        assert_eq!(seen.len(), n, "c'e' un verso ripetuto");
     }
 
     #[test]
@@ -5036,6 +5381,7 @@ mod tree_tests {
 
     #[test]
     fn no_help_row_becomes_a_command_by_accident() {
+        let _lock = lang_guard(false);
         // Il bug che questo chiude: la riga «find <testo>», che documenta il
         // comando DA TERMINALE  phosphor find , cominciava per «f» e la regola
         // starts_with la faceva diventare il filtro di stato. Cliccare una
@@ -5080,6 +5426,7 @@ mod tree_tests {
 
     #[test]
     fn the_actions_that_reach_outside_now_ask_first() {
+        let _lock = lang_guard(false);
         // Flotta (ssh verso altri PC), ripristino dal vault (scrive nel
         // magazzino dell'agente) e Wrapped (due file sul Desktop) partivano
         // senza chiedere nulla.
@@ -5368,6 +5715,7 @@ mod tree_tests {
         assert_eq!(app.all[meta.root].title, "Build the thing");
     }
 }
+
 
 
 

@@ -59,9 +59,20 @@ pub(super) const COMMAND_KEYS: [&str; 21] = [
     "t/T", "R",
 ];
 
+/// Every line of the panel, styled, in the language in use. `'static` because
+/// the text is all literals and the caller scrolls it.
+pub(super) fn lines(th: &Theme) -> Vec<Line<'static>> {
+    if crate::lang::is_en() {
+        lines_en(th)
+    } else {
+        lines_it(th)
+    }
+}
+
+/// Il pannello in italiano.
 /// Every line of the panel, styled. `'static` because the text is all literals
 /// and the caller scrolls it.
-pub(super) fn lines(th: &Theme) -> Vec<Line<'static>> {
+fn lines_it(th: &Theme) -> Vec<Line<'static>> {
     let item = |k: &str, d: &str| Line::from(vec![
         Span::styled(format!("  {:<12}", k), Style::default().fg(th.accent)),
         Span::styled(d.to_string(), Style::default().fg(th.fg)),
@@ -202,5 +213,151 @@ pub(super) fn lines(th: &Theme) -> Vec<Line<'static>> {
         Line::from(Span::styled("  quale strumento usare. Tutto resta sul tuo PC.", Style::default().fg(th.dim))),
         Line::raw(""),
         Line::from(Span::styled("  Tutto è cliccabile: tab, header, bottoni, chip, temi.", Style::default().fg(th.dim))),
+    ]
+}
+
+/// The panel in English.
+///
+/// A whole second function rather than a `t!()` pair on every line: this is a
+/// hundred and forty lines of continuous prose, and prose reads and is revised
+/// as a document, not as a column of alternatives. The keys in the left-hand
+/// column stay identical in both, which is what keeps the two in step — a test
+/// checks that neither language has a command the other lacks.
+fn lines_en(th: &Theme) -> Vec<Line<'static>> {
+    let item = |k: &str, d: &str| Line::from(vec![
+        Span::styled(format!("  {:<12}", k), Style::default().fg(th.accent)),
+        Span::styled(d.to_string(), Style::default().fg(th.fg)),
+    ]);
+    vec![
+        Line::raw(""),
+        Line::from(Span::styled("  SYMBOLS", Style::default().fg(th.accent).add_modifier(Modifier::BOLD))),
+        item("↳", "resumed session, or one from /compact (continues the previous)"),
+        item("★ · 📝 · ◉", "favorite  ·  has a note  ·  selected (multi-select)"),
+        item("◆", "a Codex session (~/.codex/sessions) rather than Claude Code: project name in a different colour, resumes with  codex resume . Filter:  agent:codex . Tokens and cost are OpenAI's (the \"gpt\" prices in phosphor.json)."),
+        item("⚠ history", "Claude Code DELETES its own transcripts after  cleanupPeriodDays  days — 30 by default, at startup, with no recycle bin: that is how a project untouched for a month disappears from here. Phosphor asks about it on the first run; you can also do it from the command line with  phosphor retention 3650  (it changes that one number in ~/.claude/settings.json and keeps a copy of the file). Codex has nothing like it: it does not prune by date. Against everything else — disk cleaners, sync, manual deletion — use  phosphor vault on ."),
+        item("⛁", "saved by the vault: its agent deleted the transcript, but it survives as a hard link in ~/.claude/phosphor-vault. It is complete — tokens, conversation, all of it — and  V  puts it back where it belongs, resumable again. Turn it on with  phosphor vault on  (off by default: it is the one thing that writes to disk)."),
+        item("⚱", "recovered from history.jsonl: Claude Code deleted the transcript (cleanupPeriodDays, 30 days by default). The prompts remain; no replies, tokens, cost or resume. Raise cleanupPeriodDays in ~/.claude/settings.json so you lose no more."),
+        item("● ◐ ·", "state:  ● running   ◐ idle   · ended"),
+        item("⏎", "the Enter key (opens the session detail)"),
+        item("↑ ↓", "up/down arrows (move the selection)"),
+        Line::from(Span::styled("  Usage tips scroll in the box at the top right (› …).", Style::default().fg(th.dim))),
+        Line::raw(""),
+        Line::from(Span::styled("  COMMANDS", Style::default().fg(th.accent).add_modifier(Modifier::BOLD))),
+        item("↑↓ / scroll", "move the selection (without opening)"),
+        item("Enter / click", "open the session detail"),
+        item("right / .", "session menu: every action in one place"),
+        item("+ / -", "expand/collapse the resumes of the selected conversation"),
+        item("A", "expand/collapse EVERY resume at once"),
+        item("⟳N ✓ / (certain)", "PROVEN link (the sessions share messages)"),
+        item("(likely)", "grouping GUESSED from title+project+time"),
+        item("v", "read the conversation (transcript) in-app"),
+        item("g", "search the CONTENT of every conversation → open at the hit"),
+        item("M", "export the conversation as Markdown (on the Desktop)"),
+        item("*  ·  n", "favorite (★)  ·  note on the session (📝)"),
+        item("N", "rename: your own title/alias shown in the list instead of the automatic one"),
+        item("O  ·  y", "open the project folder  ·  copy the transcript path"),
+        item("space", "select/deselect (◉) for bulk actions  ·  Esc clears"),
+        item("in bulk", "with a selection active:  x bundle  ·  * favorites  ·  X delete (asks first)"),
+        item("a", "explore sub-agents / workflows"),
+        item("/", "filter the list — text + filters: project: model: file: tool: agent: host: after: before:"),
+        item("f  ·  o/s", "state/★favorites filter  ·  sort column/direction"),
+        item("m", "chart metric (or click the buttons)"),
+        item("r  ·  e", "resume (claude --resume)  ·  export CSV/JSON"),
+        item("x  ·  i", "export a .phx bundle  ·  import one (file picker + confirmation)"),
+        item("H", "ARCHIVE the project (hides it in archived/, reversible) — restore from the CLI"),
+        item("W", "WRAPPED: writes the year's summary card to the Desktop (PNG + SVG) — tokens, cost, energy, water. Anonymous: numbers only."),
+        item("V", "RESTORE from the vault: puts the transcript back into its agent's own store (⛁ rows only)"),
+        item("F", "FLEET: queries your other PCs over ssh and merges their sessions [alias]"),
+        item("", "  (set up with:  phosphor remote add <ssh-alias> · on a remote row: r resumes THERE)"),
+        item("D", "DELETE the session's project (double confirmation: re-type the name; offers a .phx backup)"),
+        item("t/T  ·  p", "theme forward/back  ·  pixel graphics"),
+        item("R  ·  Tab", "rescan  ·  switch view (or 1 2 3)  ·  q quit"),
+        item("L", "switch language: English ⇄ italiano"),
+        Line::raw(""),
+        Line::from(Span::styled("  From the terminal  ›  phosphor …", Style::default().fg(th.accent))),
+        item("find <text>", "full-text search across every session"),
+        item("cost", "spend 24h/7d/30d · budget · top projects (--explain shows the arithmetic)"),
+        item("limits", "plan (e.g. Max 20x) · limit-window reset"),
+        item("watch", "live monitor with state-change alerts"),
+        item("clean", "disk usage · empty-session cleanup (asks first)"),
+        item("export-all", "create the .phx bundle (import <file> on the other PC)"),
+        item("mcp", "MCP server: gives Claude recall over your past sessions"),
+        item("~used 5h/7d", "LOCAL estimate of token volume (not the official limit %)"),
+        Line::raw(""),
+        Line::from(Span::styled("  GUIDE · Moving a session to another PC", Style::default().fg(th.accent).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("  Works with the SAME Claude account or a DIFFERENT one:", Style::default().fg(th.dim))),
+        Line::from(Span::styled("  a .phx holds no credentials; the import is entirely local.", Style::default().fg(th.dim))),
+        Line::raw(""),
+        Line::from(Span::styled("  What travels", Style::default().fg(th.accent))),
+        Line::from(Span::styled("   · the transcript + its subfolders (sub-agents and", Style::default().fg(th.fg))),
+        Line::from(Span::styled("     workflows), all in a single .phx file", Style::default().fg(th.fg))),
+        Line::from(Span::styled("   · NOT the project's code, NOT your login/credentials", Style::default().fg(th.dim))),
+        Line::raw(""),
+        Line::from(Span::styled("  1) Export (on the PC you are leaving)", Style::default().fg(th.accent))),
+        Line::from(Span::styled("     · in the app: press  x  (packs the sessions in view)", Style::default().fg(th.fg))),
+        Line::from(Span::styled("     · from the terminal:", Style::default().fg(th.fg))),
+        Line::from(Span::styled("         phosphor export-all                 (everything)", Style::default().fg(th.fg))),
+        Line::from(Span::styled("         phosphor export-all --project NAME  (one project)", Style::default().fg(th.fg))),
+        Line::from(Span::styled("         phosphor export-all --out D:\\f.phx  (chosen path)", Style::default().fg(th.fg))),
+        Line::from(Span::styled("     · lands in  Desktop\\phosphor-sessioni-*.phx", Style::default().fg(th.dim))),
+        Line::raw(""),
+        Line::from(Span::styled("  2) Transfer", Style::default().fg(th.accent))),
+        Line::from(Span::styled("     · copy the .phx to the other PC (USB, cloud, email…)", Style::default().fg(th.fg))),
+        Line::raw(""),
+        Line::from(Span::styled("  3) Import (on the destination PC)", Style::default().fg(th.accent))),
+        Line::from(Span::styled("     · in the app: press  i  → a file picker opens:", Style::default().fg(th.fg))),
+        Line::from(Span::styled("       browse the folders, choose the .phx, then confirm", Style::default().fg(th.fg))),
+        Line::from(Span::styled("     · from the terminal:  phosphor import <file.phx>", Style::default().fg(th.fg))),
+        Line::from(Span::styled("     · SAFE: never overwrites, skips files already there,", Style::default().fg(th.dim))),
+        Line::from(Span::styled("       refuses paths that would escape the projects folder", Style::default().fg(th.dim))),
+        Line::raw(""),
+        Line::from(Span::styled("  4) Resume on the new PC", Style::default().fg(th.accent))),
+        Line::from(Span::styled("     · the code must be there too, in ITS own folder", Style::default().fg(th.fg))),
+        Line::from(Span::styled("     · if the path differs, add a remap in phosphor.json:", Style::default().fg(th.fg))),
+        Line::from(Span::styled("         \"pathRemaps\": { \"C:\\\\vecchio\": \"D:\\\\nuovo\" }", Style::default().fg(th.fg))),
+        Line::from(Span::styled("     · with a remap Phosphor FORKS the session, so the", Style::default().fg(th.dim))),
+        Line::from(Span::styled("       original stays untouched on the first PC", Style::default().fg(th.dim))),
+        Line::raw(""),
+        Line::from(Span::styled("  GUIDE · Your other PCs, live (fleet)", Style::default().fg(th.accent).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("  Unlike the .phx, nothing is copied: Phosphor ASKS the other", Style::default().fg(th.fg))),
+        Line::from(Span::styled("  machines over ssh and shows their sessions beside yours. No", Style::default().fg(th.fg))),
+        Line::from(Span::styled("  remap needed — claude resumes THERE, in the right folder.", Style::default().fg(th.fg))),
+        Line::raw(""),
+        Line::from(Span::styled("  Set up (once)", Style::default().fg(th.accent))),
+        Line::from(Span::styled("     phosphor remote add <alias>     e.g. pc-home or user@host", Style::default().fg(th.fg))),
+        Line::from(Span::styled("  (the alias comes from ~/.ssh/config; Phosphor stores NO host,", Style::default().fg(th.dim))),
+        Line::from(Span::styled("   user or key — only the alias. SSH provides the channel.)", Style::default().fg(th.dim))),
+        Line::from(Span::styled("  The other PC needs: sshd running, phosphor on the PATH,", Style::default().fg(th.dim))),
+        Line::from(Span::styled("  claude logged in (THAT machine's account pays).", Style::default().fg(th.dim))),
+        Line::raw(""),
+        Line::from(Span::styled("  Use", Style::default().fg(th.accent))),
+        Line::from(Span::styled("     F          query the hosts and merge their sessions [alias]", Style::default().fg(th.fg))),
+        Line::from(Span::styled("     host:name  filter by PC ( host:qui  = local only)", Style::default().fg(th.fg))),
+        Line::from(Span::styled("     agent:codex / agent:claude  filter by agent", Style::default().fg(th.fg))),
+        Line::from(Span::styled("     r          on an [alias] row: opens  ssh -t <alias>", Style::default().fg(th.fg))),
+        Line::from(Span::styled("                phosphor resume-here <id>  → resumes THERE", Style::default().fg(th.fg))),
+        Line::from(Span::styled("  On remote rows r/detail/notes/favorites still work;", Style::default().fg(th.dim))),
+        Line::from(Span::styled("  file actions (read, export, delete…) are local only.", Style::default().fg(th.dim))),
+        Line::from(Span::styled("  From the terminal:  phosphor fleet  (per-host summary).", Style::default().fg(th.dim))),
+        Line::raw(""),
+        Line::from(Span::styled("  GUIDE · Giving Claude memory of your sessions (MCP)", Style::default().fg(th.accent).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("  What it is: with  phosphor mcp  Claude Code can search and", Style::default().fg(th.fg))),
+        Line::from(Span::styled("  re-read your PAST conversations during a new chat (\"what", Style::default().fg(th.fg))),
+        Line::from(Span::styled("  did I decide about X?\"). 100% local and read-only: no", Style::default().fg(th.fg))),
+        Line::from(Span::styled("  network, it talks to Claude over stdin/stdout.", Style::default().fg(th.dim))),
+        Line::raw(""),
+        Line::from(Span::styled("  How to turn it on (once)", Style::default().fg(th.accent))),
+        Line::from(Span::styled("     claude mcp add phosphor -- phosphor mcp", Style::default().fg(th.fg))),
+        Line::from(Span::styled("  (phosphor must be on the PATH; then reopen Claude Code)", Style::default().fg(th.dim))),
+        Line::raw(""),
+        Line::from(Span::styled("  What Claude can do through Phosphor", Style::default().fg(th.accent))),
+        Line::from(Span::styled("   · search_sessions — find sessions (the same filters as  / :", Style::default().fg(th.fg))),
+        Line::from(Span::styled("                       project: model: file: tool: after:…)", Style::default().fg(th.dim))),
+        Line::from(Span::styled("   · read_session    — reads a session's transcript", Style::default().fg(th.fg))),
+        Line::from(Span::styled("   · search_content  — searches the TEXT of every chat", Style::default().fg(th.fg))),
+        Line::from(Span::styled("  You ask Claude in plain language; it picks the tool.", Style::default().fg(th.dim))),
+        Line::from(Span::styled("  Everything stays on your PC.", Style::default().fg(th.dim))),
+        Line::raw(""),
+        Line::from(Span::styled("  Everything is clickable: tabs, headers, buttons, chips, themes.", Style::default().fg(th.dim))),
     ]
 }

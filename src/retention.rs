@@ -83,13 +83,18 @@ pub fn at_risk(base: &Path) -> bool {
 /// A one-line summary for the status bar and the CLI.
 pub fn summary(base: &Path) -> String {
     match configured(base) {
-        None => format!(
-            "Claude Code cancella i transcript dopo {DEFAULT_DAYS} giorni (impostazione assente = default)"
+        None => crate::t!(
+            format!("Claude Code cancella i transcript dopo {DEFAULT_DAYS} giorni (impostazione assente = default)"),
+            format!("Claude Code deletes transcripts after {DEFAULT_DAYS} days (setting absent = default)"),
         ),
-        Some(d) if d < AT_RISK_BELOW => {
-            format!("Claude Code cancella i transcript dopo {d} giorni")
-        }
-        Some(d) => format!("Claude Code conserva i transcript {d} giorni"),
+        Some(d) if d < AT_RISK_BELOW => crate::t!(
+            format!("Claude Code cancella i transcript dopo {d} giorni"),
+            format!("Claude Code deletes transcripts after {d} days"),
+        ),
+        Some(d) => crate::t!(
+            format!("Claude Code conserva i transcript {d} giorni"),
+            format!("Claude Code keeps transcripts for {d} days"),
+        ),
     }
 }
 

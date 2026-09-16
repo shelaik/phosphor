@@ -104,10 +104,13 @@ pub struct Config {
     /// Il giro di presentazione al primo avvio e' gia' stato visto o saltato.
     /// Serve solo a non ripresentarlo: chi lo rivuole cancella la chiave.
     pub tour_done: bool,
+    /// Lingua dell'interfaccia: `"it"` o `"en"`. Si cambia dal programma (tasto
+    /// L, o il chip in basso) e resta scritta qui.
+    pub lang: String,
 }
 impl Default for Config {
     fn default() -> Self {
-        Config { prices: Prices::default(), theme: "fosfori".into(), watch: 5, pixel: false, budget: 0.0, path_remaps: Vec::new(), sync_repo: String::new(), sync_encrypt: String::new(), sync_identity: String::new(), favorites: Vec::new(), notes: Vec::new(), aliases: Vec::new(), remotes: Vec::new(), energy_wh_per_output_token: 0.0005, water_l_per_kwh: 1.0, vault: false, retention_asked: false, mouse_only: false, prices_as_of: PRICES_CHECKED.into(), tour_done: false }
+        Config { prices: Prices::default(), theme: "fosfori".into(), watch: 5, pixel: false, budget: 0.0, path_remaps: Vec::new(), sync_repo: String::new(), sync_encrypt: String::new(), sync_identity: String::new(), favorites: Vec::new(), notes: Vec::new(), aliases: Vec::new(), remotes: Vec::new(), energy_wh_per_output_token: 0.0005, water_l_per_kwh: 1.0, vault: false, retention_asked: false, mouse_only: false, prices_as_of: PRICES_CHECKED.into(), tour_done: false, lang: "it".into() }
     }
 }
 
@@ -525,6 +528,7 @@ fn parse(buf: &[u8], c: &mut Config) {
             "mouseOnly" => c.mouse_only = p.take_bool(),
             "pricesAsOf" => c.prices_as_of = p.take_string().unwrap_or_default(),
             "tourDone" => c.tour_done = p.take_bool(),
+            "lang" => c.lang = p.take_string().unwrap_or_default(),
             "syncEncrypt" => {
                 if let Some(v) = p.take_string() {
                     c.sync_encrypt = v;
@@ -694,7 +698,8 @@ pub fn save(base: &Path, c: &Config) {
     let txt = format!(
         "{{\n  \"theme\": \"{}\",\n  \"pixel\": {},\n  \"watch\": {},\n  \"budget\": {},\n  \"energyWhPerOutputToken\": {},\n  \"waterLPerKwh\": {},\n  \"vault\": {},\n  \"retentionAsked\": {},
   \"mouseOnly\": {},
-  \"tourDone\": {},\n  \"syncRepo\": \"{}\",\n  \"syncEncrypt\": \"{}\",\n  \"syncIdentity\": \"{}\",\n  \"favorites\": [{}],\n  \"remotes\": [{}],\n  \"notes\": {{{}}},\n  \"aliases\": {{{}}},\n  \"pathRemaps\": {{{}}},\n  \"pricesAsOf\": \"{}\",\n  \"prices\": {{\n    \"opus\":    {},\n    \"sonnet\":  {},\n    \"haiku\":   {},\n    \"gpt\":     {},\n    \"default\": {}\n  }}\n}}\n",
+  \"tourDone\": {},
+  \"lang\": \"{}\",\n  \"syncRepo\": \"{}\",\n  \"syncEncrypt\": \"{}\",\n  \"syncIdentity\": \"{}\",\n  \"favorites\": [{}],\n  \"remotes\": [{}],\n  \"notes\": {{{}}},\n  \"aliases\": {{{}}},\n  \"pathRemaps\": {{{}}},\n  \"pricesAsOf\": \"{}\",\n  \"prices\": {{\n    \"opus\":    {},\n    \"sonnet\":  {},\n    \"haiku\":   {},\n    \"gpt\":     {},\n    \"default\": {}\n  }}\n}}\n",
         crate::json::escape(&c.theme),
         c.pixel,
         c.watch,
@@ -705,6 +710,7 @@ pub fn save(base: &Path, c: &Config) {
         c.retention_asked,
         c.mouse_only,
         c.tour_done,
+        crate::json::escape(&c.lang),
         crate::json::escape(&c.sync_repo),
         crate::json::escape(&c.sync_encrypt),
         crate::json::escape(&c.sync_identity),

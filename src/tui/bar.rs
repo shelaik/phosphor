@@ -12,25 +12,25 @@ use super::*;
 
 pub(super) fn shortcut_chips(app: &App) -> Vec<Vec<(&'static str, &'static str, u16)>> {
     if app.confirm.is_some() {
-        return vec![vec![("s", "conferma", 0), ("Esc", "annulla", 0)]];
+        return vec![vec![("s", t!("conferma", "confirm"), 0), ("Esc", t!("annulla", "cancel"), 0)]];
     }
     if app.picker.is_some() {
-        return vec![vec![("↑↓", "scegli", 0), ("⏎", "apri/seleziona", 0), ("←", ".. su", 0), ("Esc", "annulla", 0)]];
+        return vec![vec![("↑↓", t!("scegli", "choose"), 0), ("⏎", t!("apri/seleziona", "open/select"), 0), ("←", t!(".. su", ".. up"), 0), ("Esc", t!("annulla", "cancel"), 0)]];
     }
     if app.searching {
-        return vec![vec![("scrivi", "", 0), ("⌫", "canc", 0), ("⏎", "ok", 0), ("Esc", "annulla", 0)]];
+        return vec![vec![(t!("scrivi", "type"), "", 0), ("⌫", t!("canc", "del"), 0), ("⏎", "ok", 0), ("Esc", t!("annulla", "cancel"), 0)]];
     }
     if app.reader.is_some() {
-        return vec![vec![("↑↓", "scorri", 0), ("m", "→ markdown", A_MARKDOWN), ("Esc", "chiudi", 0)]];
+        return vec![vec![("↑↓", t!("scorri", "scroll"), 0), ("m", t!("→ markdown", "→ markdown"), A_MARKDOWN), ("Esc", t!("chiudi", "close"), 0)]];
     }
     if app.help {
-        return vec![vec![("↑↓", "scorri", 0), ("PgUp/PgDn", "salta", 0), ("Esc", "chiudi", 0)]];
+        return vec![vec![("↑↓", t!("scorri", "scroll"), 0), ("PgUp/PgDn", t!("salta", "jump"), 0), ("Esc", t!("chiudi", "close"), 0)]];
     }
     if app.gsearch.is_some() {
-        return vec![vec![("scrivi", "", 0), ("⏎", "cerca/apri", 0), ("↑↓", "scegli", 0), ("Esc", "chiudi", 0)]];
+        return vec![vec![(t!("scrivi", "type"), "", 0), ("⏎", t!("cerca/apri", "search/open"), 0), ("↑↓", t!("scegli", "choose"), 0), ("Esc", t!("chiudi", "close"), 0)]];
     }
     if app.detail || app.show_agents {
-        return vec![vec![("Esc", "chiudi", 0), ("v", "leggi", A_READ), ("r", "ripr", A_RESUME), ("a", "agenti", A_AGENTS)]];
+        return vec![vec![("Esc", t!("chiudi", "close"), 0), ("v", t!("leggi", "read"), A_READ), ("r", t!("ripr", "resume"), A_RESUME), ("a", t!("agenti", "agents"), A_AGENTS)]];
     }
     if app.tab == 0 {
         vec![
@@ -38,16 +38,16 @@ pub(super) fn shortcut_chips(app: &App) -> Vec<Vec<(&'static str, &'static str, 
             // gruppi. I tasti + e - lavorano sul gruppo selezionato, ma col
             // mouse la selezione la fai cliccando la riga, e un chip che si
             // vede e non fa niente e' peggio di uno che fa la cosa vicina.
-            vec![("↑", "", A_UP), ("↓", "", A_DOWN), ("+/-", "riprese", A_EXPAND_ALL)],
-            vec![("/", "cerca", A_SEARCH), ("f", "filtro", A_FILTER), ("o", "ord", A_SORTCOL), ("s", "dir", A_SORTDIR)],
-            vec![("⏎", "dett", A_DETAIL), ("v", "leggi", A_READ), ("g", "cerca tutto", A_GSEARCH), ("a", "agenti", A_AGENTS), ("r", "ripr", A_RESUME), ("e", "export", A_EXPORT)],
-            vec![("A", "espandi/comprimi", A_EXPAND_ALL), ("x", "porta", A_EXPBUNDLE), ("i", "importa", A_IMPORT), ("t", "tema", A_THEME_NEXT), ("p", "px", A_PIXEL), ("?", "aiuto", A_HELP), ("🖰", if app.mouse_only { "solo mouse" } else { "mouse+tasti" }, A_MOUSE_MODE), ("q", "esci", A_QUIT)],
+            vec![("↑", "", A_UP), ("↓", "", A_DOWN), ("+/-", t!("riprese", "resumes"), A_EXPAND_ALL)],
+            vec![("/", t!("cerca", "search"), A_SEARCH), ("f", t!("filtro", "filter"), A_FILTER), ("o", t!("ord", "sort"), A_SORTCOL), ("s", t!("dir", "dir"), A_SORTDIR)],
+            vec![("⏎", t!("dett", "detail"), A_DETAIL), ("v", t!("leggi", "read"), A_READ), ("g", t!("in tutte", "in all"), A_GSEARCH), ("a", t!("agenti", "agents"), A_AGENTS), ("r", t!("ripr", "resume"), A_RESUME), ("e", t!("export", "export"), A_EXPORT)],
+            vec![("A", t!("tutte", "all"), A_EXPAND_ALL), ("x", t!("porta", "bundle"), A_EXPBUNDLE), ("i", t!("importa", "import"), A_IMPORT), ("t", t!("tema", "theme"), A_THEME_NEXT), ("p", "px", A_PIXEL), ("?", t!("aiuto", "help"), A_HELP), ("🖰", if app.mouse_only { t!("solo mouse", "mouse only") } else { t!("mouse+tasti", "mouse+keys") }, A_MOUSE_MODE), ("L", if crate::lang::is_en() { "italiano" } else { "English" }, A_LANG), ("q", t!("esci", "quit"), A_QUIT)],
         ]
     } else {
         vec![
-            vec![("m", "metrica", A_METRIC)],
-            vec![("Tab", "vista", A_TAB), ("t", "tema", A_THEME_NEXT), ("p", "px", A_PIXEL)],
-            vec![("?", "aiuto", A_HELP), ("🖰", if app.mouse_only { "solo mouse" } else { "mouse+tasti" }, A_MOUSE_MODE), ("q", "esci", A_QUIT)],
+            vec![("m", t!("metrica", "metric"), A_METRIC)],
+            vec![("Tab", t!("vista", "view"), A_TAB), ("t", t!("tema", "theme"), A_THEME_NEXT), ("p", "px", A_PIXEL)],
+            vec![("?", t!("aiuto", "help"), A_HELP), ("🖰", if app.mouse_only { t!("solo mouse", "mouse only") } else { t!("mouse+tasti", "mouse+keys") }, A_MOUSE_MODE), ("L", if crate::lang::is_en() { "italiano" } else { "English" }, A_LANG), ("q", t!("esci", "quit"), A_QUIT)],
         ]
     }
 }

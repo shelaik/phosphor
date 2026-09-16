@@ -117,6 +117,7 @@ this: every one of these actions is also a thing you can click — see
 | `o` / `s` | sort column / direction | | `t` / `T` | theme forward / back |
 | `a` | sub-agents and workflows | | `p` | pixel graphics on/off |
 | `R` | immediate rescan | | `m` | chart metric |
+| `L` | language: italiano ⇄ English | | 🖰 | mouse-only mode |
 | `F` | fleet: merge sessions from your other PCs (ssh) | | `V` | restore a `⛁` session from the vault |
 | `W` | Wrapped card (PNG + SVG) on the Desktop | | | |
 | `q` / `Ctrl+C` | quit | | | |
@@ -128,10 +129,26 @@ writes back into the agent's own store), deleting, and *fleet* — which lists
 the PCs it is about to reach over ssh before contacting any of them.
 
 The tips that scroll in the box at the top right — the help you get without
-asking for it — are written as verse, in the Italian *dolce stil novo*. The
-keys and commands inside them stay literal (`v`, `/`, `phosphor cost`): a line
-that hid the key behind a metaphor would be decoration, not help. A test keeps
-them within the box and checks that every key they promise exists.
+asking for it — are written as verse. The keys and commands inside them stay
+literal (`v`, `/`, `phosphor cost`): a line that hid the key behind a metaphor
+would be decoration, not help. A test keeps them within the box and checks that
+every key they promise exists.
+
+### Language
+
+Press **`L`**, or click the `L` chip in the bottom bar: Italian ⇄ English,
+instantly, anywhere in the app. The choice is remembered in `phosphor.json`
+(`lang`), and the terminal side follows it too — `--help`, `ls`, `cost`,
+`clean`, `limits`, `retention`, `vault`.
+
+The switch sits on a single key and a visible chip on purpose: whoever needs it
+is precisely the person who cannot read what is on screen, and sending them to
+find a setting in a config file written in the wrong language would be a joke.
+
+The scrolling tips exist in both: Italian in the *dolce stil novo*, English in
+its contemporary — the verse of Shakespeare. Not a line-by-line translation,
+which would have produced crooked prose in two languages instead of verse in
+one.
 
 ### Mouse only
 
@@ -498,7 +515,7 @@ Codex, `default` for anything else), default `theme` and `pixel`, `mouseOnly` fo
 `budget` for alerts, `pathRemaps` for cross-PC resume, `syncRepo` /
 `syncEncrypt` / `syncIdentity` for the optional git sync, your `favorites`
 and `notes`, `vault` for the hard-link vault (off by default),
-`tourDone` for the first-run introduction,
+`tourDone` for the first-run introduction, `lang` (`"it"` or `"en"`),
 and `energyWhPerOutputToken` / `waterLPerKwh` for the footprint estimate shown
 by `cost`, in the detail view and on the Wrapped card.
 

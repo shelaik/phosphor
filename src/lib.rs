@@ -9,6 +9,7 @@ pub mod corrections;
 pub mod fleet;
 pub mod icon;
 pub mod json;
+pub mod lang;
 pub mod live;
 pub mod mcp;
 pub mod plan;
