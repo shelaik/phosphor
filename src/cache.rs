@@ -296,6 +296,10 @@ fn parse_line(buf: &[u8]) -> Option<Session> {
     if s.id.is_empty() || s.path.is_empty() {
         return None;
     }
+    // Difesa in profondita': la cache la scriviamo noi con righe gia'
+    // ripulite, ma e' un file di testo nella cartella dell'utente e non
+    // costa niente non fidarsene.
+    s.tame_display_fields();
     Some(s)
 }
 

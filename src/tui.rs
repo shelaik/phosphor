@@ -481,7 +481,25 @@ fn abs_date(ms: u64) -> String {
         .map(|t| t.format("%d/%m/%y %H:%M").to_string())
         .unwrap_or_else(|| "—".into())
 }
+/// Truncate to `w` characters for display — and drop control characters while
+/// we are here.
+///
+/// The second half is a SECOND line of defence. The first is `tame` when a
+/// session is read (see `scan::Session::tame_display_fields`), and in normal
+/// operation nothing hostile ever gets this far. But ratatui does **not**
+/// filter what it draws: an ESC inside a `Span` lands in the buffer and is
+/// written to the terminal verbatim, which a test in this file now proves. So
+/// the last thing that touches a string before it is drawn refuses to pass one
+/// on. The check is a scan without allocation: strings with nothing to strip
+/// are not copied twice.
 fn clip(s: &str, w: usize) -> String {
+    let tamed;
+    let s = if s.chars().any(|c| (c as u32) < 0x20 || c == '\u{7f}') {
+        tamed = crate::tame(s);
+        tamed.as_str()
+    } else {
+        s
+    };
     if s.chars().count() <= w {
         s.to_string()
     } else {
@@ -950,6 +968,9 @@ impl App {
             view_all: vec![], row_meta: vec![], expanded_chains: HashSet::new(),
             rect_title_col: Rect::default(),
         };
+        for s in &mut a.all {
+            s.tame_display_fields();
+        }
         link_continuations(&mut a.all);
         link_kin(&mut a.all);
         a.apply_filter();
@@ -1906,7 +1927,17 @@ impl App {
     /// manual rescan, fleet arrival — rebuilds identically. Dedup by id: a
     /// session synced via .phx exists on several PCs; the LOCAL copy wins (it
     /// is richer and the only actionable one), and across hosts the first wins.
+    /// L'unico imbuto da cui le sessioni entrano nella lista.
+    ///
+    /// Qui si ripuliscono i campi che verranno disegnati. In teoria e'
+    /// ridondante — chi legge i transcript lo fa gia' — ma questo e' il punto
+    /// in cui NON si puo' dimenticare: qualunque strada porti una sessione
+    /// nell'elenco passa di qua. E serve, perche' ratatui non filtra niente:
+    /// un ESC dentro uno `Span` finisce nel buffer e da li' sul terminale.
     fn set_sessions(&mut self, mut v: Vec<Session>) {
+        for s in &mut v {
+            s.tame_display_fields();
+        }
         if !self.fleet.is_empty() {
             let mut seen: HashSet<String> = v.iter().map(|s| s.id.clone()).collect();
             for s in &self.fleet {
@@ -5262,6 +5293,43 @@ mod tree_tests {
         // E i valori veri non vengono toccati.
         assert_eq!(fmt_usd(0.5), "$0.500");
         assert_eq!(fmt_usd(12.345), "$12.35");
+    }
+
+    #[test]
+    fn nothing_hostile_in_a_session_reaches_the_screen_as_an_escape() {
+        // Due difese, e questo test guarda la seconda. La prima e' `tame` al
+        // momento della lettura (vedi scan::tame_display_fields). La seconda e'
+        // che ratatui scarta i grafemi di larghezza zero — e i caratteri di
+        // controllo lo sono — quindi un ESC non arriva comunque al terminale.
+        //
+        // La seconda non e' nostra: e' un dettaglio di una libreria, che
+        // potrebbe cambiare in un aggiornamento senza che nessuno lo noti. Per
+        // questo sta scritta qui: se ratatui smettesse di filtrare, il giorno
+        // dopo lo saprei da un test rosso invece che da un terminale ridipinto.
+        let _lock = lang_guard(false);
+        let esc = "\u{1b}[31mROSSO\u{1b}[0m\u{7}";
+        let mut s = sess("aaa", esc, "C:/p", esc, 1000);
+        s.models = vec![esc.into()];
+        s.git_branch = esc.into();
+        let mut app = app_with(vec![s]);
+        app.ts.select(Some(0));
+
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        for detail in [false, true] {
+            app.detail = detail;
+            let mut term = Terminal::new(TestBackend::new(120, 40)).expect("backend");
+            term.draw(|f| ui(f, &mut app)).expect("disegno");
+            let buf = term.backend().buffer();
+            for cell in buf.content() {
+                assert!(
+                    !cell.symbol().chars().any(|c| (c as u32) < 0x20 || c == '\u{7f}'),
+                    "una cella porta un carattere di controllo: {:?}",
+                    cell.symbol()
+                );
+            }
+        }
+        app.detail = false;
     }
 
     #[test]

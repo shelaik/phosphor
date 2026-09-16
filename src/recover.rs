@@ -292,6 +292,10 @@ fn ghost(projects: &Path, folder: &str, cwd: &str, idx: usize, b: &[&Prompt]) ->
         }
     }
     s.search_text = search;
+    // I prompt vengono da history.jsonl, che registra quello che l'utente ha
+    // incollato: un carattere di controllo ci arriva senza bisogno di
+    // malizia. Ripuliti qui come per le sessioni vere.
+    s.tame_display_fields();
     s
 }
 

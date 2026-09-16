@@ -135,6 +135,55 @@ impl Session {
         }
     }
 
+    /// Strip control and bidi characters from every field that gets DISPLAYED.
+    ///
+    /// A transcript is not our data: it can arrive from an imported `.phx`, from
+    /// another PC over the fleet, or simply be written by hand. Any of its
+    /// strings can therefore carry ANSI escapes, and they used to reach the
+    /// terminal untouched — `phosphor cost` printed a project name straight
+    /// out of a session's recorded `cwd`, so a crafted one could repaint or
+    /// hide whatever it liked. `ls` was hardened long ago; `cost`, `clean` and
+    /// `cost --explain` were not, which is what taming at each print site gets
+    /// you in the end.
+    ///
+    /// So it happens HERE, once, where the data is born: everything downstream
+    /// — the CLI, the TUI, the web JSON, the MCP server, the Wrapped card —
+    /// is safe by construction rather than by memory.
+    ///
+    /// `path` and `id` are deliberately left alone: they are used to open files
+    /// and are validated by their own rules ([`crate::valid_session_id`]), and
+    /// rewriting them would break access to the very file they name.
+    pub fn tame_display_fields(&mut self) {
+        let t = |x: &mut String| {
+            if x.chars().any(|c| (c as u32) < 0x20 || c == '\u{7f}') {
+                *x = crate::tame(x);
+            }
+        };
+        t(&mut self.project_path);
+        t(&mut self.project_name);
+        t(&mut self.title);
+        t(&mut self.summary);
+        t(&mut self.first_prompt);
+        t(&mut self.last_prompt);
+        t(&mut self.git_branch);
+        t(&mut self.version);
+        t(&mut self.entrypoint);
+        t(&mut self.agent);
+        t(&mut self.host);
+        for m in &mut self.models {
+            t(m);
+        }
+        for (name, _) in &mut self.tools {
+            t(name);
+        }
+        for f in &mut self.files {
+            t(f);
+        }
+        for (model, _) in &mut self.usage {
+            t(model);
+        }
+    }
+
     /// True for a session RECONSTRUCTED from `history.jsonl` by
     /// [`crate::recover`]: the transcript it describes was deleted by Claude
     /// Code's retention, so there is no file at `path` to read, resume or
@@ -773,6 +822,7 @@ fn parse_session(path: &Path, size: u64) -> Option<Session> {
         push_search(&mut search, base);
     }
     s.search_text = search;
+    s.tame_display_fields();
     Some(s)
 }
 
@@ -1228,6 +1278,55 @@ mod tests {
         format!(
             r#"{{"parentUuid":"p","isSidechain":false,"cwd":"C:\\Users\\dev\\proj","type":"assistant","uuid":"{uuid}","timestamp":"2026-09-10T08:01:00.000Z","message":{{"role":"assistant","model":"{model}","content":[{{"type":"text","text":"ok"}}],"usage":{{"input_tokens":100,"output_tokens":{out},"cache_read_input_tokens":2000,"cache_creation_input_tokens":{total},"cache_creation":{{"ephemeral_5m_input_tokens":{cache_5m},"ephemeral_1h_input_tokens":{cache_1h}}},"thinking_tokens":42,"service_tier":"standard"}}}}}}"#
         )
+    }
+
+    #[test]
+    fn a_hostile_transcript_cannot_write_escape_codes_to_the_terminal() {
+        // Un transcript non e' roba nostra: puo' arrivare da un .phx importato,
+        // da un altro PC via flotta, o essere scritto a mano. Prima queste
+        // stringhe finivano sul terminale intatte: `phosphor cost` stampava il
+        // nome di progetto preso dal `cwd` registrato nella sessione, quindi un
+        // cwd costruito ad arte poteva ridipingere o nascondere quello che
+        // voleva. `ls` era stato messo in sicurezza tempo fa; cost, clean e
+        // cost --explain no — ed e' quello che succede a ripulire a ogni punto
+        // di stampa invece che alla nascita del dato.
+        let esc = "\u{1b}[31mROSSO\u{1b}[0m";
+        let line = format!(
+            r#"{{"parentUuid":null,"cwd":"C:\\x\\{esc}","gitBranch":"{esc}","version":"{esc}","entrypoint":"{esc}","type":"user","uuid":"u1","timestamp":"2026-09-10T08:00:00.000Z","message":{{"role":"user","content":"{esc} prompt"}}}}"#
+        );
+        let assistant = format!(
+            r#"{{"type":"assistant","uuid":"a1","timestamp":"2026-09-10T08:01:00.000Z","message":{{"role":"assistant","model":"{esc}","content":[{{"type":"tool_use","name":"{esc}","input":{{}}}}],"usage":{{"input_tokens":1,"output_tokens":1}}}}}}"#
+        );
+        let s = scan_lines(&[line, assistant]);
+
+        let bad = |x: &str| x.chars().any(|c| (c as u32) < 0x20 || c == '\u{7f}');
+        for (what, v) in [
+            ("project_path", &s.project_path),
+            ("project_name", &s.project_name),
+            ("title", &s.title),
+            ("summary", &s.summary),
+            ("first_prompt", &s.first_prompt),
+            ("last_prompt", &s.last_prompt),
+            ("git_branch", &s.git_branch),
+            ("version", &s.version),
+            ("entrypoint", &s.entrypoint),
+        ] {
+            assert!(!bad(v), "{what} porta ancora caratteri di controllo: {v:?}");
+        }
+        for m in &s.models {
+            assert!(!bad(m), "modello: {m:?}");
+        }
+        for (name, _) in &s.tools {
+            assert!(!bad(name), "strumento: {name:?}");
+        }
+        for (model, _) in &s.usage {
+            assert!(!bad(model), "bucket: {model:?}");
+        }
+        // Il testo resta leggibile: si toglie il controllo, non la parola.
+        assert!(s.project_name.contains("ROSSO"), "nome: {:?}", s.project_name);
+
+        // E il percorso del FILE non viene toccato: serve ad aprirlo.
+        assert!(s.path.ends_with(".jsonl"));
     }
 
     #[test]

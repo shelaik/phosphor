@@ -28,7 +28,7 @@
 use crate::scan::Session;
 use std::collections::HashMap;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 /// Folder name under `<base>`; also the marker that tells a vaulted session
@@ -72,6 +72,14 @@ fn vault_path(base: &Path, codex_home: Option<&Path>, s: &Session) -> Option<Pat
 fn origin_path(base: &Path, codex_home: Option<&Path>, vaulted: &Path) -> Option<PathBuf> {
     let v = dir(base);
     let rel = vaulted.strip_prefix(&v).ok()?;
+    // Rust non normalizza i percorsi: un `..` sopravvive a strip_prefix e a
+    // join, quindi un `path` costruito ad arte — una riga arrivata da un
+    // bundle importato, o una cache modificata a mano — potrebbe far atterrare
+    // il ripristino FUORI dallo store dell'agente. Qui si accettano solo nomi
+    // veri: niente risalite, niente radici, niente prefissi di volume.
+    if !rel.components().all(|c| matches!(c, Component::Normal(_))) {
+        return None;
+    }
     let mut it = rel.components();
     let agent = it.next()?.as_os_str().to_str()?.to_string();
     let rest: PathBuf = it.collect();
@@ -366,6 +374,37 @@ static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new
         // …and with the original back, the vault stops listing it
         assert!(scan_incremental(&base, &mut cache).0.is_empty());
         std::fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn a_crafted_path_cannot_make_a_restore_land_outside_the_store() {
+        // Rust non normalizza i percorsi: un `..` sopravvive a strip_prefix e a
+        // join. Una riga con un path costruito ad arte — da un bundle
+        // importato, o da una cache modificata a mano — avrebbe potuto far
+        // scrivere il ripristino fuori dallo store dell'agente.
+        let base = Path::new("C:/u/.claude");
+        let codex = PathBuf::from("C:/u/.codex");
+        let v = dir(base);
+
+        // Il caso buono continua a funzionare.
+        let ok = v.join("claude").join("C--p").join("aaa.jsonl");
+        assert_eq!(
+            origin_path(base, Some(&codex), &ok),
+            Some(base.join("projects").join("C--p").join("aaa.jsonl"))
+        );
+
+        // Le risalite vengono rifiutate, non normalizzate.
+        for evil in [
+            v.join("claude").join("..").join("..").join("evil.jsonl"),
+            v.join("codex").join("..").join("evil.jsonl"),
+            v.join("claude").join("sub").join("..").join("..").join("evil.jsonl"),
+        ] {
+            assert_eq!(origin_path(base, Some(&codex), &evil), None, "«{}»", evil.display());
+        }
+
+        // E un agente che non conosciamo non porta da nessuna parte.
+        let unknown = v.join("altro").join("x.jsonl");
+        assert_eq!(origin_path(base, Some(&codex), &unknown), None);
     }
 
     #[test]

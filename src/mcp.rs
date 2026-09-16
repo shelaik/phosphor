@@ -111,7 +111,7 @@ pub fn run(base: PathBuf) -> io::Result<()> {
         if n == 0 { break; } // stdin closed -> shut down
         let line = buf.trim();
         if line.is_empty() { continue; }
-        if let Some(resp) = handle(line, &sessions) {
+        if let Some(resp) = handle(line, &base, &sessions) {
             out.write_all(resp.as_bytes())?;
             out.write_all(b"\n")?;
             out.flush()?;
@@ -122,7 +122,7 @@ pub fn run(base: PathBuf) -> io::Result<()> {
 
 /// Handle one JSON-RPC message. Returns Some(response line) for requests, None
 /// for notifications (which take no reply).
-fn handle(line: &str, sessions: &[Session]) -> Option<String> {
+fn handle(line: &str, base: &Path, sessions: &[Session]) -> Option<String> {
     let mut p = P::new(line.as_bytes());
     let msg = parse_value(&mut p);
     let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
@@ -150,14 +150,14 @@ fn handle(line: &str, sessions: &[Session]) -> Option<String> {
             let params = msg.get("params");
             let name = params.and_then(|p| p.get("name")).and_then(|v| v.as_str()).unwrap_or("");
             let args = params.and_then(|p| p.get("arguments"));
-            Some(call_tool(&id_str, name, args, sessions))
+            Some(call_tool(&id_str, name, args, base, sessions))
         }
         "ping" => Some(rpc_result(&id_str, "{}")),
         _ => Some(rpc_error(&id_str, -32601, &format!("metodo non supportato: {method}"))),
     }
 }
 
-fn call_tool(id: &str, name: &str, args: Option<&Json>, sessions: &[Session]) -> String {
+fn call_tool(id: &str, name: &str, args: Option<&Json>, base: &Path, sessions: &[Session]) -> String {
     match name {
         "search_sessions" => {
             let q = args.and_then(|a| a.get("query")).and_then(|v| v.as_str()).unwrap_or("");
@@ -167,7 +167,7 @@ fn call_tool(id: &str, name: &str, args: Option<&Json>, sessions: &[Session]) ->
         "read_session" => match args.and_then(|a| a.get("id")).and_then(|v| v.as_str()) {
             Some(sid) => {
                 let max = args.and_then(|a| a.get("max_chars")).and_then(|v| v.as_usize()).unwrap_or(20000).clamp(500, 200_000);
-                match tool_read_session(sid, max, sessions) {
+                match tool_read_session(sid, max, base, sessions) {
                     Some(t) => text_result(id, &t, false),
                     None => text_result(id, &format!("nessuna sessione con id '{sid}'"), true),
                 }
@@ -212,9 +212,13 @@ fn tool_search_sessions(query: &str, limit: usize, sessions: &[Session]) -> Stri
     format!("{head}{}", shown.join("\n\n"))
 }
 
-fn tool_read_session(id: &str, max_chars: usize, sessions: &[Session]) -> Option<String> {
+fn tool_read_session(id: &str, max_chars: usize, base: &Path, sessions: &[Session]) -> Option<String> {
     let s = sessions.iter().find(|s| s.id == id)?;
-    let turns = scan::read_transcript(Path::new(&s.path));
+    // `turns_of` e non `scan::read_transcript`: quest'ultimo conosce solo il
+    // formato di Claude Code, quindi una sessione Codex tornava VUOTA e una
+    // recuperata provava ad aprire un file che non esiste. Cioe' la memoria
+    // che diamo a Claude aveva due buchi silenziosi.
+    let turns = crate::turns_of(base, s);
     let mut out = format!("# {} ({})\n\n", s.title.replace('\n', " "), s.project_name);
     for t in turns {
         let who = match t.role { 0 => "Utente", 1 => "Claude", _ => "·" };
@@ -279,18 +283,18 @@ mod tests {
     #[test]
     fn initialize_echoes_protocol_and_advertises_tools() {
         let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"c","version":"1"}}}"#;
-        let r = handle(init, &[]).expect("init has a response");
+        let r = handle(init, Path::new("."), &[]).expect("init has a response");
         assert!(r.contains("\"id\":1"));
         assert!(r.contains("\"protocolVersion\":\"2025-06-18\""));
         assert!(r.contains("\"serverInfo\""));
         // tools/list
-        let tl = handle(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#, &[]).unwrap();
+        let tl = handle(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#, Path::new("."), &[]).unwrap();
         assert!(tl.contains("search_sessions") && tl.contains("read_session") && tl.contains("search_content"));
     }
 
     #[test]
     fn notification_gets_no_response() {
-        assert!(handle(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#, &[]).is_none());
+        assert!(handle(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#, Path::new("."), &[]).is_none());
     }
 
     #[test]
@@ -303,12 +307,12 @@ mod tests {
             "[".repeat(20000),
             "]".repeat(20000)
         );
-        let _ = handle(&deep, &[]);
+        let _ = handle(&deep, Path::new("."), &[]);
     }
 
     #[test]
     fn unknown_method_is_jsonrpc_error() {
-        let r = handle(r#"{"jsonrpc":"2.0","id":7,"method":"bogus"}"#, &[]).unwrap();
+        let r = handle(r#"{"jsonrpc":"2.0","id":7,"method":"bogus"}"#, Path::new("."), &[]).unwrap();
         assert!(r.contains("\"error\"") && r.contains("-32601") && r.contains("\"id\":7"));
     }
 
@@ -319,7 +323,7 @@ mod tests {
             sess("bbb", "other", "Fix tests", 4000),
         ];
         let call = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_sessions","arguments":{"query":"project:phosphor"}}}"#;
-        let r = handle(call, &s).unwrap();
+        let r = handle(call, Path::new("."), &s).unwrap();
         assert!(r.contains("Build the parser"), "trova la sessione del progetto phosphor");
         assert!(!r.contains("Fix tests"), "esclude l'altro progetto");
         assert!(r.contains("id: aaa"));
@@ -328,7 +332,7 @@ mod tests {
 
     #[test]
     fn read_session_missing_id_is_error() {
-        let r = handle(r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"read_session","arguments":{"id":"nope"}}}"#, &[]).unwrap();
+        let r = handle(r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"read_session","arguments":{"id":"nope"}}}"#, Path::new("."), &[]).unwrap();
         assert!(r.contains("\"isError\":true"));
     }
 }

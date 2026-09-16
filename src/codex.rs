@@ -625,7 +625,11 @@ pub fn parse_one(path: &Path, size: u64, mtime: u64, titles: &HashMap<String, St
     if !r.parent.is_empty() {
         return None; // a sub-agent thread is never a session of its own
     }
-    Some(to_session(r, path, size, mtime, titles))
+    let mut s = to_session(r, path, size, mtime, titles);
+    // Stesso patto di `scan::parse_session`: i campi che si vedono vengono
+    // ripuliti qui, dove nascono. Un rollout Codex e' un file come un altro.
+    s.tame_display_fields();
+    Some(s)
 }
 
 /// The thread names, for callers that parse rollouts one at a time.
