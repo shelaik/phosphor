@@ -190,7 +190,11 @@ fn regroup(sessions: &[Session], prices: &Prices) -> (Vec<usize>, Vec<Band>) {
         idxs.sort_by(|&a, &b| sessions[b].mtime_ms.cmp(&sessions[a].mtime_ms).then(sessions[a].id.cmp(&sessions[b].id)));
         let start = order.len();
         let cost: f64 = idxs.iter().map(|&i| cost(&sessions[i], prices)).sum();
-        let tok: u64 = idxs.iter().map(|&i| sessions[i].input_tokens + sessions[i].output_tokens).sum();
+        // Saturante come altrove: i token vengono da file che non controlliamo.
+        let tok: u64 = idxs
+            .iter()
+            .map(|&i| sessions[i].input_tokens.saturating_add(sessions[i].output_tokens))
+            .fold(0u64, |a, b| a.saturating_add(b));
         let live = idxs.iter().filter(|&&i| sessions[i].live != "ended").count();
         let len = idxs.len(); order.extend(idxs);
         bands.push(Band { proj, start, len, cost, live, tok });
@@ -517,7 +521,8 @@ fn draw_world(p: &Pal, app: &mut App, area: Rect) {
             let sv = {
                 let s = &app.sessions[idx];
                 SessView { project: s.project_name.clone(), live: s.live.clone(),
-                    tok: s.input_tokens + s.output_tokens, agents: (s.subagents + s.workflows) as usize,
+                    tok: s.input_tokens.saturating_add(s.output_tokens),
+                    agents: s.subagents.saturating_add(s.workflows) as usize,
                     model: model_kind(s.models.first().map(|x| x.as_str()).unwrap_or("")) }
             };
             let hover = inside && cell.contains(vec2(mx, my));
