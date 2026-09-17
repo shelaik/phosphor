@@ -1,17 +1,50 @@
 # Phosphor
 
-A standalone scanner for your local coding-agent sessions — **Claude Code** and
-the **Codex CLI**, side by side in one list. A single Rust binary (~1.5 MB, no
-external runtime) that reads `~/.claude` and `~/.codex` and shows all your
-sessions (where they ran, what they did, where they left off) in a native
-full-screen terminal app, a browser dashboard, or a pixel-art graphical
-version.
+**Every conversation you have had with Claude Code and the Codex CLI, in one
+list you can actually use.**
 
-Read-only by default: it never modifies your transcripts and never uploads
-anything on its own. The only feature that sends data out is the opt-in
-`sync push` (to a private git repo you configure), and it runs only when you
-invoke it. Any action that writes to disk is explained first and asks for
-confirmation.
+Your coding agents already keep a full record of every session — what you asked,
+what they did, which files they touched, what it cost. It sits on your disk as
+thousands of JSON lines you will never read, in folders you will never open, and
+Claude Code deletes it after 30 days.
+
+Phosphor turns that into a screen.
+
+```
+●   my-api          Fix the auth middleware        412   1.2M  today 14:22  running
+◐   frontend        Rewrite the settings page       89   340k  today 09:10  idle
+·   scraper      ◆  Parse the sitemap               23    61k  yesterday    ended
+⛁   old-project     Migrate to Postgres            201   890k  3 weeks ago  ended
+```
+
+One row per session. Click one to read the whole conversation back. Click
+*Resume* and the agent picks it up where you left off — in the right folder,
+with its memory intact.
+
+### What it actually does for you
+
+- **Find that conversation again.** Search every prompt, file and tool you have
+  ever used, across both agents, in milliseconds. "Where did I fix that CORS
+  thing?" is a question with an answer now.
+- **Pick up where you stopped.** Resume any session, including on a different
+  PC: Phosphor packs one into a single portable file, or asks your other
+  machines over ssh and shows their sessions beside yours.
+- **See what it costs.** Spend per day, per project, per model — priced model by
+  model, with the arithmetic printed out if you want to check it. Plus the
+  energy and water behind it, which nothing else will tell you.
+- **Stop losing work.** Claude Code deletes its own transcripts after 30 days,
+  with no recycle bin. Phosphor asks you about that on the first run, rebuilds
+  what was already lost, and can keep everything alive for **zero extra bytes**.
+
+### What it will not do
+
+It **reads**. It never edits a transcript and never sends anything anywhere on
+its own — no telemetry, no account, no network at all unless you explicitly run
+the optional git sync. Anything that writes a file, contacts another PC or
+deletes something tells you first and waits for a yes.
+
+One Rust binary, no installer, no runtime, three dependencies. Windows-ready;
+it works in a terminal, in your browser, or as a pixel-art adventure.
 
 ---
 
@@ -36,16 +69,24 @@ confirmation.
 
 ## Install and run
 
-**Windows (ready to use).** Two ways to get the binary:
+**Windows — 30 seconds, no admin rights, no runtime.**
 
-- **Download** the `.exe` from the [latest release](../../releases/latest)
-  (`phosphor.exe`, plus `phosphor-adv.exe` for the graphical version), or
-- grab the prebuilt binaries in the [`dist/`](dist) folder of this repo.
+1. Open the [latest release](../../releases/latest) and download **`phosphor.exe`**.
+2. Double-click it.
 
-Then just double-click `phosphor.exe`. Optional one-step setup: download
-`install.ps1` next to the `.exe` and run it (right-click > Run with PowerShell)
-to copy it under `%LOCALAPPDATA%\Phosphor`, add it to your `PATH`, and create a
-Desktop shortcut. No admin rights, no runtime needed.
+That is the whole thing. It is a single self-contained file: nothing is
+installed, nothing is registered, and deleting the `.exe` uninstalls it
+completely.
+
+**Want it on your PATH and on the Desktop?** Download `install.ps1` from the
+same release, put it *next to* the `.exe`, then right-click it > *Run with
+PowerShell*. It copies Phosphor under `%LOCALAPPDATA%\Phosphor`, adds that to
+your user PATH and makes a Desktop shortcut — still no admin rights. The same
+release also carries `phosphor-adv.exe` (the pixel-art version) and
+`SHA256SUMS.txt` if you want to check what you downloaded.
+
+The first time it opens it will show you three screens explaining the list, ask
+whether to stop Claude Code from deleting your history, and get out of the way.
 
 ```
 phosphor                 native terminal app (default, no browser)
@@ -54,9 +95,13 @@ phosphor --web           browser dashboard at http://127.0.0.1:8787
 phosphor --dir <path>    use a different .claude directory
 ```
 
-Everyone uses their own copy: the binary auto-detects the current user's
-`%USERPROFILE%\.claude`. The *Resume* action requires the `claude` command to be
-on your PATH. To compile from source, see [Build](#build-from-source).
+**Everyone sees their own sessions.** There is nothing baked into the binary:
+at every launch it reads `%USERPROFILE%` and opens that user's `.claude`. Hand
+the same `.exe` to a colleague and they get their own list — an empty one if
+they have never used Claude Code. *Resume* needs the `claude` command on the
+PATH; everything else works without it.
+
+To compile it yourself, see [Build from source](#build-from-source).
 
 ## Commands
 
