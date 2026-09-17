@@ -421,6 +421,12 @@ fn take_nested_string(p: &mut P, want: &str) -> Option<String> {
 }
 
 /// `{input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens}`.
+/// Un numero di token da un rollout: mai negativo, mai oltre il tetto
+/// [`crate::scan::MAX_TOKENS_PER_FIELD`].
+fn tok(p: &mut P) -> u64 {
+    (p.take_number().max(0.0) as u64).min(crate::scan::MAX_TOKENS_PER_FIELD)
+}
+
 fn take_usage(p: &mut P) -> (u64, u64, u64, u64) {
     let (mut i, mut c, mut w, mut o) = (0u64, 0u64, 0u64, 0u64);
     if !p.obj_begin() {
@@ -433,10 +439,12 @@ fn take_usage(p: &mut P) -> (u64, u64, u64, u64) {
             None => break,
         };
         match k.as_str() {
-            "input_tokens" => i = p.take_number().max(0.0) as u64,
-            "cached_input_tokens" => c = p.take_number().max(0.0) as u64,
-            "cache_write_input_tokens" => w = p.take_number().max(0.0) as u64,
-            "output_tokens" => o = p.take_number().max(0.0) as u64,
+            // Tagliati al tetto come nel parser di Claude Code: un rollout e' un
+            // file come un altro, e `1e30` in un campo faceva panicare la somma.
+            "input_tokens" => i = tok(p),
+            "cached_input_tokens" => c = tok(p),
+            "cache_write_input_tokens" => w = tok(p),
+            "output_tokens" => o = tok(p),
             _ => {
                 let _ = p.skip();
             }

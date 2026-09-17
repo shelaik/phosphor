@@ -206,15 +206,19 @@ pub fn render(sessions: &[Session], cfg: &Config, now_ms: u64, opts: &Opts) -> C
     let mut by_day: BTreeMap<NaiveDate, u64> = BTreeMap::new();
 
     for s in &sel {
-        tok_io += s.input_tokens + s.output_tokens;
-        msgs += s.message_count;
-        corrections += s.corrections;
+        // Saturanti: i numeri vengono da file che non controlliamo, e questa e'
+        // l'unica cosa di Phosphor fatta per essere CONDIVISA. Meglio un totale
+        // fermo al massimo che un programma che muore mentre la disegna.
+        tok_io = tok_io.saturating_add(s.input_tokens.saturating_add(s.output_tokens));
+        msgs = msgs.saturating_add(s.message_count);
+        corrections = corrections.saturating_add(s.corrections);
         cost += config::cost(s, &cfg.prices);
         let (e, w) = config::footprint(s, cfg.energy_wh_per_output_token, cfg.water_l_per_kwh);
         wh += e;
         water_ml += w;
         for (name, n) in &s.tools {
-            *tools.entry(name.clone()).or_insert(0) += n;
+            let e = tools.entry(name.clone()).or_insert(0);
+            *e = e.saturating_add(*n);
         }
         if let Some(m) = s.models.first() {
             *models.entry(model_family(m)).or_insert(0) += 1;
@@ -224,7 +228,8 @@ pub fn render(sessions: &[Session], cfg: &Config, now_ms: u64, opts: &Opts) -> C
         }
         *by_proj.entry(s.project_name.clone()).or_insert(0.0) += config::cost(s, &cfg.prices);
         if let Some(d) = local_date(s.mtime_ms) {
-            *by_day.entry(d).or_insert(0) += s.input_tokens + s.output_tokens;
+            let e = by_day.entry(d).or_insert(0);
+            *e = e.saturating_add(s.input_tokens.saturating_add(s.output_tokens));
         }
     }
 
@@ -549,6 +554,41 @@ mod tests {
         a.project_name = "topsecret-client".into();
         a.mtime_ms = 1_700_000_000_000; // fixed point in time
         a
+    }
+
+    #[test]
+    fn a_hostile_session_does_not_break_the_card() {
+        // La card e' l'unica cosa di Phosphor fatta per essere CONDIVISA, e i
+        // suoi numeri e nomi vengono dalle sessioni. Una sessione costruita ad
+        // arte non deve farla saltare, ne' infilarci dentro un ESC che finisca
+        // in un SVG che qualcun altro aprira'.
+        let mut evil = sample();
+        evil.project_name = "\u{1b}[31m<script>alert(1)</script>".into();
+        evil.models = vec!["\u{1b}[5m".into()];
+        evil.tools = vec![("\u{7}bel".into(), u64::MAX)];
+        evil.input_tokens = u64::MAX;
+        evil.output_tokens = u64::MAX;
+        evil.cache_read = u64::MAX;
+        evil.cache_creation = u64::MAX;
+        evil.corrections = u64::MAX;
+        evil.message_count = u64::MAX;
+        // Le sessioni entrano ripulite: questo e' il patto del programma.
+        evil.tame_display_fields();
+
+        let card = render(
+            &[evil],
+            &Config::default(),
+            1_700_100_000_000,
+            &Opts { window: Window::All, show_cost: true, anonymous: false },
+        );
+        assert!(!card.svg.is_empty());
+        // Niente caratteri di controllo nell'SVG che verra' condiviso.
+        assert!(
+            !card.svg.chars().any(|c| (c as u32) < 0x20 && c != '\n' && c != '\t'),
+            "l'SVG porta caratteri di controllo"
+        );
+        // E niente marcatori che cambierebbero il senso del documento.
+        assert!(!card.svg.contains("<script"), "l'SVG non deve contenere markup estraneo");
     }
 
     #[test]

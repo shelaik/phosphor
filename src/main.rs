@@ -987,7 +987,7 @@ fn do_export_bundle(base: &std::path::Path, sessions: &[Session], out: Option<Pa
 /// `.claude/projects`. NEVER overwrites (existing files are kept), rejects unsafe
 /// paths, and ALWAYS asks for confirmation showing exactly what will be added.
 fn do_import(base: &std::path::Path, path: &std::path::Path, cli_remaps: &[(String, String)]) {
-    let data = match std::fs::read(path) {
+    let data = match phosphor::bundle::read_file(path) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("Non riesco a leggere «{}»: {e}", path.display());

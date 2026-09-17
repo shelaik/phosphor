@@ -108,6 +108,19 @@ pub const KIND_CACHE_5M: usize = 3;
 pub const KIND_CACHE_1H: usize = 4;
 pub const KINDS: usize = 5;
 
+/// Tetto per UN campo di token in UN messaggio.
+///
+/// Mille miliardi di token in un solo messaggio non esistono: le finestre di
+/// contesto stanno nei milioni, e questo e' quattro ordini di grandezza sopra.
+/// Serve contro i numeri assurdi di un file ostile, non contro quelli veri —
+/// un valore legittimo non lo sfiorera' mai.
+///
+/// Senza, un transcript con `"input_tokens":1e30` faceva due danni: in debug
+/// il programma PANICAVA sommando (`attempt to add with overflow`), in release
+/// stampava una spesa di 677 mila miliardi di dollari. Il primo lo chiude la
+/// somma saturante, il secondo questo tetto.
+pub const MAX_TOKENS_PER_FIELD: u64 = 1_000_000_000_000;
+
 impl Session {
     /// Add `n` tokens of one kind to a model's bucket, and to the aggregate.
     /// The two are always written together so they can never drift apart.
@@ -115,15 +128,17 @@ impl Session {
         if n == 0 {
             return;
         }
+        let n = n.min(MAX_TOKENS_PER_FIELD);
+        // Saturante, non `+`: i numeri arrivano da un file che non controlliamo.
         match kind {
-            KIND_IN => self.input_tokens += n,
-            KIND_OUT => self.output_tokens += n,
-            KIND_CACHE_READ => self.cache_read += n,
-            _ => self.cache_creation += n,
+            KIND_IN => self.input_tokens = self.input_tokens.saturating_add(n),
+            KIND_OUT => self.output_tokens = self.output_tokens.saturating_add(n),
+            KIND_CACHE_READ => self.cache_read = self.cache_read.saturating_add(n),
+            _ => self.cache_creation = self.cache_creation.saturating_add(n),
         }
         let m = if model.is_empty() { "?" } else { model };
         if let Some(e) = self.usage.iter_mut().find(|(k, _)| k == m) {
-            e.1[kind] += n;
+            e.1[kind] = e.1[kind].saturating_add(n);
             return;
         }
         // A session with more models than this is a bug in the transcript, not
@@ -284,7 +299,15 @@ struct Entry {
     mtime: u64,
 }
 
-fn walk(dir: &Path, base: &Path, out: &mut Vec<Entry>) {
+/// Cammina lo store. `depth` e' un fermo, non un limite di progetto: i
+/// transcript stanno a due livelli, e gli altri camminatori (vault, codex) un
+/// tetto ce l'hanno gia'. Senza, una gerarchia molto profonda — una copia
+/// sbagliata, un backup ricorsivo — fa saltare lo stack invece di essere
+/// semplicemente ignorata.
+fn walk(dir: &Path, base: &Path, out: &mut Vec<Entry>, depth: usize) {
+    if depth > 12 {
+        return;
+    }
     let rd = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
         Err(_) => return,
@@ -296,7 +319,7 @@ fn walk(dir: &Path, base: &Path, out: &mut Vec<Entry>) {
             Err(_) => continue,
         };
         if ft.is_dir() {
-            walk(&path, base, out);
+            walk(&path, base, out, depth + 1);
         } else if path.extension().and_then(|x| x.to_str()) == Some("jsonl") {
             let parts: Vec<String> = path
                 .strip_prefix(base)
@@ -330,7 +353,7 @@ pub fn scan_incremental(
     cache: &mut HashMap<String, Session>,
 ) -> (Vec<Session>, bool) {
     let mut entries = Vec::new();
-    walk(projects_dir, projects_dir, &mut entries);
+    walk(projects_dir, projects_dir, &mut entries, 0);
 
     // Split into top-level sessions vs. nested subagent/workflow transcripts.
     let mut mains: Vec<(PathBuf, u64, u64)> = Vec::new();
@@ -1099,6 +1122,17 @@ fn parse_content(p: &mut P, has_tool_use: &mut bool, tools: &mut HashMap<String,
 /// breakdown, so it is only used when that breakdown is absent (older
 /// transcripts). When both appear the split wins, because the TTL is what
 /// decides the price.
+/// Un numero di token da un file che non controlliamo: mai negativo, mai oltre
+/// [`MAX_TOKENS_PER_FIELD`].
+fn tok_num(p: &mut P) -> u64 {
+    (p.take_number().max(0.0) as u64).min(MAX_TOKENS_PER_FIELD)
+}
+
+/// `acc + il prossimo numero`, saturando.
+fn add_tok(acc: u64, p: &mut P) -> u64 {
+    acc.saturating_add(tok_num(p))
+}
+
 fn parse_usage(p: &mut P, out: &mut [u64; KINDS]) {
     if !p.obj_begin() {
         return;
@@ -1111,10 +1145,11 @@ fn parse_usage(p: &mut P, out: &mut [u64; KINDS]) {
             None => break,
         };
         match k.as_str() {
-            "input_tokens" => out[KIND_IN] += p.take_number().max(0.0) as u64,
-            "output_tokens" => out[KIND_OUT] += p.take_number().max(0.0) as u64,
-            "cache_read_input_tokens" => out[KIND_CACHE_READ] += p.take_number().max(0.0) as u64,
-            "cache_creation_input_tokens" => cache_total += p.take_number().max(0.0) as u64,
+            // `num` taglia al tetto e somma saturando: vedi MAX_TOKENS_PER_FIELD.
+            "input_tokens" => out[KIND_IN] = add_tok(out[KIND_IN], p),
+            "output_tokens" => out[KIND_OUT] = add_tok(out[KIND_OUT], p),
+            "cache_read_input_tokens" => out[KIND_CACHE_READ] = add_tok(out[KIND_CACHE_READ], p),
+            "cache_creation_input_tokens" => cache_total = add_tok(cache_total, p),
             "cache_creation" => {
                 if p.obj_begin() {
                     loop {
@@ -1124,13 +1159,13 @@ fn parse_usage(p: &mut P, out: &mut [u64; KINDS]) {
                         };
                         let n = match ck.as_str() {
                             "ephemeral_5m_input_tokens" => {
-                                let n = p.take_number().max(0.0) as u64;
-                                out[KIND_CACHE_5M] += n;
+                                let n = tok_num(p);
+                                out[KIND_CACHE_5M] = out[KIND_CACHE_5M].saturating_add(n);
                                 n
                             }
                             "ephemeral_1h_input_tokens" => {
-                                let n = p.take_number().max(0.0) as u64;
-                                out[KIND_CACHE_1H] += n;
+                                let n = tok_num(p);
+                                out[KIND_CACHE_1H] = out[KIND_CACHE_1H].saturating_add(n);
                                 n
                             }
                             _ => {
@@ -1278,6 +1313,43 @@ mod tests {
         format!(
             r#"{{"parentUuid":"p","isSidechain":false,"cwd":"C:\\Users\\dev\\proj","type":"assistant","uuid":"{uuid}","timestamp":"2026-09-10T08:01:00.000Z","message":{{"role":"assistant","model":"{model}","content":[{{"type":"text","text":"ok"}}],"usage":{{"input_tokens":100,"output_tokens":{out},"cache_read_input_tokens":2000,"cache_creation_input_tokens":{total},"cache_creation":{{"ephemeral_5m_input_tokens":{cache_5m},"ephemeral_1h_input_tokens":{cache_1h}}},"thinking_tokens":42,"service_tier":"standard"}}}}}}"#
         )
+    }
+
+    #[test]
+    fn absurd_token_counts_neither_crash_nor_become_a_bill() {
+        // Un transcript con  "input_tokens":1e30  faceva due danni. In debug il
+        // programma PANICAVA sommando («attempt to add with overflow»), cioe'
+        // bastava un file del genere in ~/.claude per non farlo piu' partire.
+        // In release non crashava e diceva una bugia: 677 mila miliardi di
+        // dollari di spesa stimata.
+        //
+        // La somma satura (niente panico) e ogni campo viene tagliato al tetto
+        // (niente cifre assurde). I due difetti hanno due rimedi diversi:
+        // saturare da solo avrebbe tolto il crash lasciando il conto folle.
+        let huge = r#"{"type":"assistant","uuid":"a","timestamp":"2026-09-10T08:00:00.000Z","message":{"role":"assistant","model":"m","content":[],"usage":{"input_tokens":1e30,"output_tokens":1e30,"cache_read_input_tokens":1e30,"cache_creation_input_tokens":1e30,"cache_creation":{"ephemeral_1h_input_tokens":1e30}}}}"#;
+        let s = scan_lines(&[huge.into(), huge.into(), huge.into()]);
+
+        for (what, v) in [
+            ("input", s.input_tokens),
+            ("output", s.output_tokens),
+            ("cache_read", s.cache_read),
+            ("cache_creation", s.cache_creation),
+        ] {
+            assert!(v > 0, "{what} non deve azzerarsi: il messaggio esiste");
+            assert!(
+                v <= 3 * MAX_TOKENS_PER_FIELD,
+                "{what} = {v}: oltre il tetto per tre messaggi"
+            );
+        }
+        // Anche i bucket per modello, che alimentano il prezzo.
+        for (m, u) in &s.usage {
+            for (i, v) in u.iter().enumerate() {
+                assert!(*v <= 3 * MAX_TOKENS_PER_FIELD, "bucket {m}[{i}] = {v}");
+            }
+        }
+        // E il totale resta un numero con cui si puo' fare aritmetica: la somma
+        // di tutte le sessioni di uno store non deve avvicinarsi a u64::MAX.
+        assert!(s.input_tokens.checked_mul(1_000_000).is_some());
     }
 
     #[test]
@@ -1513,3 +1585,4 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 }
+

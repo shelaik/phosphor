@@ -36,6 +36,25 @@ const MAGIC: &[u8] = b"PHX1\n";
 /// ignored on read), which never needs a version bump.
 const FORMAT_VERSION: u64 = 1;
 const MAX_FILES: usize = 200_000;
+/// Tetto su un `.phx` intero. Il contenitore viene letto tutto in memoria —
+/// il parser lavora su fette, quindi deve — e senza un limite un file enorme
+/// fa morire il programma per esaurimento di memoria invece di dire cosa non
+/// va. Due gigabyte sono molto piu' di qualunque store reale: su questo PC,
+/// 258 sessioni pesano 900 MB in tutto.
+pub const MAX_BUNDLE: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Legge un bundle rifiutando quelli oltre [`MAX_BUNDLE`], senza allocarli.
+pub fn read_file(path: &Path) -> Result<Vec<u8>, String> {
+    let md = std::fs::metadata(path).map_err(|e| format!("non leggibile: {e}"))?;
+    if md.len() > MAX_BUNDLE {
+        return Err(format!(
+            "bundle troppo grande: {:.1} GB (tetto {} GB)",
+            md.len() as f64 / 1_073_741_824.0,
+            MAX_BUNDLE / 1_073_741_824
+        ));
+    }
+    std::fs::read(path).map_err(|e| format!("non leggibile: {e}"))
+}
 const MAX_REL: usize = 4096;
 
 // ---------------------------------------------------------------------------
@@ -66,7 +85,12 @@ fn rel_of(projects: &Path, p: &Path) -> Option<String> {
 }
 
 /// Recursively collect every file under `dir`.
-fn walk_files(dir: &Path, out: &mut Vec<PathBuf>) {
+/// Come `scan::walk`: il fermo evita che una gerarchia assurda faccia saltare
+/// lo stack mentre si prepara un bundle.
+fn walk_files(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
+    if depth > 12 {
+        return;
+    }
     let rd = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
         Err(_) => return,
@@ -74,7 +98,7 @@ fn walk_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for e in rd.flatten() {
         let path = e.path();
         match e.file_type() {
-            Ok(ft) if ft.is_dir() => walk_files(&path, out),
+            Ok(ft) if ft.is_dir() => walk_files(&path, out, depth + 1),
             Ok(ft) if ft.is_file() => out.push(path),
             _ => {}
         }
@@ -143,7 +167,7 @@ pub fn build(base: &Path, sessions: &[Session], created: &str) -> Vec<u8> {
             let dir = parent.join(&s.id);
             if dir.is_dir() {
                 let mut sub = Vec::new();
-                walk_files(&dir, &mut sub);
+                walk_files(&dir, &mut sub, 0);
                 sub.sort();
                 for f in sub {
                     if let Some(rel) = rel_of(&projects, &f) {
@@ -575,6 +599,57 @@ mod tests {
         assert_eq!(again.skipped, 2);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn every_shape_of_escaping_path_is_refused() {
+        // Un .phx arriva da un altro PC, via chiavetta o email: e' il pezzo di
+        // input piu' esterno che il programma accetti. Qui provo le forme che
+        // proverebbe qualcuno, non solo quella ovvia con «..».
+        for evil in [
+            "../evil.jsonl",
+            "../../evil.jsonl",
+            "a/../../evil.jsonl",
+            "a/./../../evil.jsonl",
+            "/etc/passwd",                 // assoluto unix: primo componente vuoto
+            "//server/share/x.jsonl",      // UNC
+            "C:/Windows/evil.jsonl",       // assoluto con lettera di volume
+            "C:evil.jsonl",                // percorso relativo al volume
+            r"a\..\..\evil.jsonl",         // separatori Windows
+            r"a\b.jsonl",
+            "a/b.jsonl:stream",            // alternate data stream (NTFS)
+            "a/\u{0}b.jsonl",              // NUL nel nome
+            "",
+            "/",
+            "a//b.jsonl",                  // componente vuoto in mezzo
+        ] {
+            assert!(safe_rel(evil).is_none(), "«{evil}» doveva essere rifiutato");
+        }
+        // E quello buono continua a passare, con i suoi componenti separati.
+        assert_eq!(
+            safe_rel("C--Users-dev-p/16b42417.jsonl"),
+            Some(vec!["C--Users-dev-p".to_string(), "16b42417.jsonl".to_string()])
+        );
+        // Un percorso lunghissimo non passa: e' un tetto, non un'opinione.
+        let long = format!("{}/x.jsonl", "a".repeat(MAX_REL));
+        assert!(safe_rel(&long).is_none());
+    }
+
+    #[test]
+    fn a_bundle_bigger_than_the_cap_is_refused_before_it_is_loaded() {
+        // Il contenitore viene letto tutto in memoria (il parser lavora su
+        // fette, quindi deve): senza tetto un file enorme fa morire il
+        // programma per esaurimento di memoria invece di dire cosa non va.
+        let dir = std::env::temp_dir().join(format!("phosphor-phx-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("piccolo.phx");
+        std::fs::write(&p, b"PHX1\n").unwrap();
+        assert!(read_file(&p).is_ok(), "un file normale si legge");
+        assert!(read_file(&dir.join("non-esiste.phx")).is_err());
+        // Il tetto e' generoso ma reale: 2 GB contro i ~900 MB di uno store
+        // vero con 258 sessioni.
+        assert!(MAX_BUNDLE >= 1024 * 1024 * 1024);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -447,8 +447,11 @@ fn fmt_usd(n: f64) -> String {
         format!("${:.3}", n)
     }
 }
+/// Token «di conversazione» (input + output). Saturante perche' i due addendi
+/// vengono da un file che non controlliamo, e questa somma sta dentro a ogni
+/// riga della tabella: un panico qui e' un programma che non si apre.
 fn tok_of(s: &Session) -> u64 {
-    s.input_tokens + s.output_tokens
+    s.input_tokens.saturating_add(s.output_tokens)
 }
 /// Human-readable byte size, scaled to B / KB / MB / GB as appropriate.
 fn fmt_size(bytes: u64) -> String {
@@ -1259,7 +1262,7 @@ impl App {
             self.status = t!("⚠ una selezionata è live: deselezionala prima", "⚠ one selected is live: deselect it first").into();
             return;
         }
-        let bytes: u64 = sel.iter().map(|s| s.size).sum();
+        let bytes: u64 = sel.iter().map(|s| s.size).fold(0u64, |a, b| a.saturating_add(b));
         let paths: Vec<String> = sel.iter().map(|s| s.path.clone()).collect();
         let (n, mb) = (paths.len(), bytes as f64 / 1_048_576.0);
         let lines = t!(
@@ -1851,7 +1854,7 @@ impl App {
         for s in &self.all {
             if Path::new(&s.path).parent() == Some(dir.as_path()) {
                 count += 1;
-                bytes += s.size;
+                bytes = bytes.saturating_add(s.size);
                 if s.live == "running" || s.live == "idle" { live += 1; }
             }
         }
@@ -2283,7 +2286,7 @@ impl App {
         for s in &self.all {
             if Path::new(&s.path).parent() == Some(dir.as_path()) {
                 count += 1;
-                bytes += s.size;
+                bytes = bytes.saturating_add(s.size);
                 if s.live == "running" || s.live == "idle" { live += 1; }
             }
         }
@@ -2545,7 +2548,7 @@ impl App {
     /// The import only ADDS missing files — it never overwrites or deletes.
     fn request_import_path(&mut self, src: PathBuf) {
         if self.dry { return; }
-        let data = match std::fs::read(&src) { Ok(d) => d, Err(_) => { self.status = t!("impossibile leggere il .phx", "cannot read the .phx").into(); return; } };
+        let data = match crate::bundle::read_file(&src) { Ok(d) => d, Err(e) => { self.status = t!(format!("bundle non leggibile: {e}"), format!("bundle unreadable: {e}")); return; } };
         let parsed = match crate::bundle::inspect(&data) { Ok(p) => p, Err(e) => { self.status = if crate::lang::is_en() { format!("invalid bundle: {e}") } else { format!("bundle non valido: {e}") }; return; } };
         // Apply the persistent pathRemaps so a bundle from another PC lands under
         // THIS machine's project paths (natively resumable). Same remaps the `r`
@@ -2581,7 +2584,7 @@ impl App {
     }
     /// Actually import the bundle (already confirmed).
     fn do_import_bundle(&mut self, src: PathBuf) {
-        let data = match std::fs::read(&src) { Ok(d) => d, Err(_) => { self.status = t!("impossibile leggere il .phx", "cannot read the .phx").into(); return; } };
+        let data = match crate::bundle::read_file(&src) { Ok(d) => d, Err(e) => { self.status = t!(format!("bundle non leggibile: {e}"), format!("bundle unreadable: {e}")); return; } };
         let parsed = match crate::bundle::inspect(&data) { Ok(p) => p, Err(e) => { self.status = if crate::lang::is_en() { format!("invalid bundle: {e}") } else { format!("bundle non valido: {e}") }; return; } };
         let _ = std::fs::create_dir_all(self.base.join("projects"));
         let rep = crate::bundle::apply_remapped(&self.base, &data, &parsed, false, &self.remaps);
@@ -3935,7 +3938,7 @@ fn stats_line(app: &App, th: &Theme) -> Paragraph<'static> {
     let run = app.all.iter().filter(|s| s.live == "running").count();
     let idle = app.all.iter().filter(|s| s.live == "idle").count();
     let projs = app.all.iter().map(|s| s.project_name.clone()).collect::<std::collections::HashSet<_>>().len();
-    let tok: u64 = app.all.iter().map(tok_of).sum();
+    let tok: u64 = app.all.iter().map(tok_of).fold(0u64, |a, b| a.saturating_add(b));
     let costtot: f64 = app.all.iter().map(|s| cost(s, &app.prices)).sum();
     let mk = |v: String, l: &str| vec![
         Span::styled(v, Style::default().fg(th.accent).add_modifier(Modifier::BOLD)),
@@ -3960,8 +3963,8 @@ fn stats_line(app: &App, th: &Theme) -> Paragraph<'static> {
     // Rough LOCAL usage gauge for the rolling 5h / 7d windows: token volume of
     // sessions last active in-window. NOT the official limit %, just a feel for
     // "am I heavy this window" (the `~` marks it as an estimate).
-    let tok5: u64 = app.all.iter().filter(|s| now.saturating_sub(s.mtime_ms) < 5 * 3_600_000).map(tok_of).sum();
-    let tok7: u64 = app.all.iter().filter(|s| now.saturating_sub(s.mtime_ms) < 7 * 86_400_000).map(tok_of).sum();
+    let tok5: u64 = app.all.iter().filter(|s| now.saturating_sub(s.mtime_ms) < 5 * 3_600_000).map(tok_of).fold(0u64, |a, b| a.saturating_add(b));
+    let tok7: u64 = app.all.iter().filter(|s| now.saturating_sub(s.mtime_ms) < 7 * 86_400_000).map(tok_of).fold(0u64, |a, b| a.saturating_add(b));
     sp.extend(mk(format!("~{}", fmt_tok(tok5)), t!("uso 5h", "used 5h")));
     sp.extend(mk(format!("~{}", fmt_tok(tok7)), t!("7g", "7d")));
     sp.push(div());
@@ -4101,7 +4104,7 @@ fn render_sessions(f: &mut Frame, app: &mut App, th: &Theme, area: Rect) {
 
     // Totals span ALL filtered sessions (view_all), not just the visible/collapsed
     // rows, so collapsing a chain doesn't change the reported count/footprint.
-    let total_size: u64 = app.view_all.iter().map(|&i| app.all[i].size).sum();
+    let total_size: u64 = app.view_all.iter().map(|&i| app.all[i].size).fold(0u64, |a, b| a.saturating_add(b));
     let (twh, tml) = app.view_all.iter()
         .map(|&i| crate::config::footprint(&app.all[i], app.energy_wh_per_output_token, app.water_l_per_kwh))
         .fold((0.0, 0.0), |(e, w), (de, dw)| (e + de, w + dw));
