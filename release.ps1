@@ -57,8 +57,15 @@ Write-Host "OK — binario allineato: $stamp" -ForegroundColor Green
 # che stiamo per pubblicare si apre e risponde. Non lo eseguiva nessuno, e
 # infatti conteneva un contratto vecchio di mesi senza che si vedesse.
 Write-Host "selftest …" -ForegroundColor Cyan
-$self = (& ".\target\release\phosphor.exe" --selftest 2>&1 | Out-String)
-if ($self -notmatch "selftest TUI: OK") { throw "SELFTEST FALLITO:`n$self" }
+# NIENTE `2>&1` qui. In Windows PowerShell 5.1 redirigere lo stderr di un
+# comando NATIVO incarta ogni riga in un ErrorRecord, e con
+# $ErrorActionPreference = 'Stop' quello diventa un errore terminante: il
+# selftest passava e la release si fermava lo stesso. La riga «Scanning …» esce
+# su stderr e va bene che finisca a schermo; l'esito sta sullo stdout.
+$self = (& ".\target\release\phosphor.exe" --selftest | Out-String)
+if ($LASTEXITCODE -ne 0 -or $self -notmatch "selftest TUI: OK") {
+    throw "SELFTEST FALLITO (uscita $LASTEXITCODE):`n$self"
+}
 Write-Host "OK — selftest passato" -ForegroundColor Green
 
 if ($DryRun) {
