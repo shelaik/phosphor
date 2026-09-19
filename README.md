@@ -484,9 +484,72 @@ Register it once with Claude Code:
 claude mcp add phosphor -- phosphor mcp
 ```
 
-(use the full path to `phosphor.exe` if it isn't on your `PATH`). It exposes three
-tools: `search_sessions` (same `project:`/`model:`/`file:`/`after:` filter syntax
-as the in-app search), `read_session`, and `search_content`.
+(use the full path to `phosphor.exe` if it isn't on your `PATH`, then reopen
+Claude Code). Both agents are covered: Claude Code sessions, Codex sessions, and
+the ones Phosphor recovered after Claude Code had deleted them.
+
+### What to actually ask it
+
+You talk to Claude normally — it picks the tool. These are real questions with
+what happens behind them:
+
+> **"What did I decide about the cache invalidation, a few weeks ago?"**
+> Claude greps the *text* of every conversation you have had, finds the passages,
+> and reads that session back. You do not need to remember which project it was.
+
+> **"Find my sessions that touched scan.rs in September."**
+> `file:scan.rs after:2026-09-01` — the filter matches the files the session
+> actually touched, not what you happened to type.
+
+> **"Summarise what I did on the frontend project last week."**
+> `project:frontend after:2026-09-08`, then Claude reads the sessions it finds
+> and writes the summary. Useful on a Monday, or for a standup.
+
+> **"Have I ever used ssh in a session, and how did I set it up?"**
+> Content search across every transcript, with the surrounding lines.
+
+> **"Which of my Opus sessions were the longest?"**
+> `model:opus` — every result carries the project, the date, the message count
+> and the token total, so Claude can rank them for you.
+
+> **"Read back the session where I set up the git sync and tell me the commands."**
+> Claude searches, opens the transcript, and pulls the commands out of it —
+> instead of you scrolling a terminal you closed two weeks ago.
+
+### The three tools, precisely
+
+| Tool | What it does | Arguments |
+|---|---|---|
+| `search_sessions` | finds sessions by query and filters; returns title, project, date, messages, tokens and the id | `query`, `limit` (default 20, max 200) |
+| `read_session` | reads one full conversation back, turn by turn | `id` (from a search), `max_chars` (default 20 000) |
+| `search_content` | greps the TEXT of every transcript, up to 2 passages per session, with the id to read further | `text`, `limit` (default 20, max 100) |
+
+Filters `search_sessions` understands — all of them narrow, several combine:
+
+| Filter | Matches |
+|---|---|
+| `project:` | the project's name |
+| `file:` | a file the session touched |
+| `tool:` | a tool it used (`tool:Edit`, `tool:Bash`) |
+| `model:` | a model it ran on (`model:opus`) |
+| `agent:` | `agent:codex` or `agent:claude` |
+| `after:` `before:` | a date, `YYYY-MM-DD` |
+| `host:` | another of your PCs, or `host:qui` for this one |
+| anything else | free text over prompts, files, tools, titles and project names |
+
+So `project:api tool:Bash after:2026-09-01 deploy` means all four at once: the
+api project, sessions that ran Bash, since 1 September, mentioning deploy.
+
+**Which of the two searches to use** — the difference matters. The free text in
+`search_sessions` looks at **what you wrote**: your prompts, plus titles, file
+names, tool names and projects. `search_content` reads the **whole
+conversation**, Claude's answers included. So *"a session where I asked about
+retention"* is the first one; *"wherever the word `cleanupPeriodDays` appears,
+even if Claude was the one who said it"* is the second.
+
+**What it will not do.** It reads. It cannot resume, edit or delete a session,
+and it never leaves your machine — it speaks to Claude over stdin/stdout, with
+no network involved.
 
 ## Plan limits
 

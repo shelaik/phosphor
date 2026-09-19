@@ -177,7 +177,7 @@ fn call_tool(id: &str, name: &str, args: Option<&Json>, base: &Path, sessions: &
         "search_content" => match args.and_then(|a| a.get("text")).and_then(|v| v.as_str()) {
             Some(text) if !text.trim().is_empty() => {
                 let limit = args.and_then(|a| a.get("limit")).and_then(|v| v.as_usize()).unwrap_or(20).clamp(1, 100);
-                text_result(id, &tool_search_content(text, limit, sessions), false)
+                text_result(id, &tool_search_content(text, limit, base, sessions), false)
             }
             _ => text_result(id, "manca l'argomento 'text'", true),
         },
@@ -231,12 +231,17 @@ fn tool_read_session(id: &str, max_chars: usize, base: &Path, sessions: &[Sessio
     Some(out)
 }
 
-fn tool_search_content(text: &str, limit: usize, sessions: &[Session]) -> String {
+fn tool_search_content(text: &str, limit: usize, base: &Path, sessions: &[Session]) -> String {
     let needle = text.to_lowercase();
     let mut out: Vec<String> = Vec::new();
     for s in sessions {
         if out.len() >= limit { break; }
-        let hits = scan::grep_transcript(Path::new(&s.path), &needle, 2);
+        // `grep_of` e non `grep_transcript`: lo stesso buco gia' chiuso in
+        // `read_session`. Quest'ultimo conosce solo il formato di Claude Code,
+        // quindi le sessioni Codex e quelle recuperate non venivano MAI
+        // trovate — e senza dirlo: zero risultati sembra «non c'e'», non
+        // «non ho guardato».
+        let hits = crate::grep_of(base, s, &needle, 2);
         for h in hits {
             if out.len() >= limit { break; }
             let who = match h.role { 0 => "utente", 1 => "claude", _ => "·" };
@@ -278,6 +283,51 @@ mod tests {
     fn sess(id: &str, proj: &str, title: &str, mtime: u64) -> Session {
         Session { id: id.into(), project_name: proj.into(), title: title.into(), mtime_ms: mtime,
             modified: "2026-06-20T10:00:00".into(), search_text: title.to_lowercase(), ..Default::default() }
+    }
+
+    #[test]
+    fn the_memory_we_give_claude_covers_both_agents() {
+        // Due volte lo stesso difetto: `read_session` prima, `search_content`
+        // poi. Tutti e due leggevano i file col parser di Claude Code, quindi
+        // una sessione Codex tornava vuota e una recuperata provava ad aprire
+        // un file inesistente — senza dirlo. Zero risultati sembra «non c'e'»,
+        // non «non ho guardato», ed e' il tipo di bugia che nessuno verifica.
+        let dir = std::env::temp_dir().join(format!("phosphor-mcp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Un rollout Codex vero: il formato e' suo, non quello di Claude Code.
+        let roll = dir.join("rollout-2026-09-10T08-00-00-16b42417.jsonl");
+        std::fs::write(
+            &roll,
+            concat!(
+                r#"{"type":"session_meta","payload":{"id":"16b42417","cwd":"C:\\p","timestamp":"2026-09-10T08:00:00.000Z"}}"#,
+                "\n",
+                r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"come si configura il parallaxe"}]}}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        let mut cx = sess("16b42417", "p", "sessione codex", 1000);
+        cx.path = roll.to_string_lossy().into_owned();
+        cx.agent = "codex".into();
+
+        let sessions = vec![cx];
+        let call = r#"{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"search_content","arguments":{"text":"parallaxe"}}}"#;
+        let r = handle(call, &dir, &sessions).expect("risposta");
+        // NON basta cercare la parola: quando non trova nulla la risposta e'
+        // «Nessun contenuto contiene 'parallaxe'», che la parola ce l'ha
+        // dentro. Si controlla che ci sia un RISULTATO: il pallino e l'id.
+        assert!(!r.contains("Nessun contenuto"), "nessun risultato: {r}");
+        assert!(r.contains("16b42417"), "il risultato deve citare la sessione: {r}");
+        assert!(r.contains("parallaxe"), "e mostrare il frammento: {r}");
+
+        // E la stessa sessione si deve poter leggere per intero.
+        let read = r#"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"read_session","arguments":{"id":"16b42417"}}}"#;
+        let r = handle(read, &dir, &sessions).expect("risposta");
+        assert!(!r.contains("nessuna sessione"), "sessione non trovata: {r}");
+        assert!(r.contains("parallaxe"), "read_session su Codex deve restituire il testo: {r}");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
