@@ -183,8 +183,10 @@ every key they promise exists.
 
 Press **`L`**, or click the `L` chip in the bottom bar: Italian ⇄ English,
 instantly, anywhere in the app. The choice is remembered in `phosphor.json`
-(`lang`), and the terminal side follows it too — `--help`, `ls`, `cost`,
-`clean`, `limits`, `retention`, `vault`.
+(`lang`), and **everything the terminal prints follows it too** — every
+command, down to the confirmations that ask before an irreversible delete,
+which are the last place anyone should be reading a language they do not
+speak.
 
 The switch sits on a single key and a visible chip on purpose: whoever needs it
 is precisely the person who cannot read what is on screen, and sending them to

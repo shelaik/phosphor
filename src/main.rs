@@ -577,19 +577,19 @@ fn do_clean(base: &std::path::Path, sessions: &[Session], delete_empty: bool) {
         return;
     }
     if empty.is_empty() {
-        println!("\nNessuna sessione vuota da eliminare. ✓");
+        if phosphor::lang::is_en() { println!("\nNo empty sessions to delete. ✓"); } else { println!("\nNessuna sessione vuota da eliminare. ✓"); }
         return;
     }
-    println!("\n⚠  STAI PER ELIMINARE {} file di sessione — OPERAZIONE IRREVERSIBILE:", empty.len());
+    if phosphor::lang::is_en() { println!("\n⚠  YOU ARE ABOUT TO DELETE {} session files — THIS CANNOT BE UNDONE:", empty.len()); } else { println!("\n⚠  STAI PER ELIMINARE {} file di sessione — OPERAZIONE IRREVERSIBILE:", empty.len()); }
     for s in empty.iter().take(30) {
         println!("     {}", s.path);
     }
     if empty.len() > 30 {
-        println!("     … e altri {}", empty.len() - 30);
+        if phosphor::lang::is_en() { println!("     … and {} more", empty.len() - 30); } else { println!("     … e altri {}", empty.len() - 30); }
     }
     let proceed = confirm(&format!("Eliminare definitivamente {} file ({:.1} MB)?", empty.len(), esize as f64 / 1048576.0));
     if !proceed {
-        println!("Annullato: NON è stato eliminato nulla.");
+        if phosphor::lang::is_en() { println!("Cancelled: NOTHING was deleted."); } else { println!("Annullato: NON è stato eliminato nulla."); }
         return;
     }
     // defense in depth: only delete .jsonl files that live *inside* <base>/projects
@@ -604,7 +604,7 @@ fn do_clean(base: &std::path::Path, sessions: &[Session], delete_empty: bool) {
             freed += s.size;
         }
     }
-    println!("Eliminati {} file ({:.1} MB liberati).", removed, freed as f64 / 1048576.0);
+    if phosphor::lang::is_en() { println!("Deleted {} files ({:.1} MB freed).", removed, freed as f64 / 1048576.0); } else { println!("Eliminati {} file ({:.1} MB liberati).", removed, freed as f64 / 1048576.0); }
 }
 
 /// `phosphor clean --delete-project "<nome>"` — cancella DEFINITIVAMENTE tutti i
@@ -622,21 +622,21 @@ fn do_delete_project(base: &std::path::Path, sessions: &[Session], name: &str) {
         .filter_map(dir_of)
         .collect();
     if dirs.is_empty() {
-        println!("Nessun progetto chiamato «{name}».");
+        if phosphor::lang::is_en() { println!("No project called «{name}»."); } else { println!("Nessun progetto chiamato «{name}»."); }
         let mut names: Vec<&str> = sessions.iter().map(|s| s.project_name.as_str()).collect();
         names.sort_unstable();
         names.dedup();
         if !names.is_empty() {
-            println!("Progetti disponibili: {}", names.into_iter().take(20).collect::<Vec<_>>().join(", "));
+            if phosphor::lang::is_en() { println!("Projects available: {}", names.into_iter().take(20).collect::<Vec<_>>().join(", ")); } else { println!("Progetti disponibili: {}", names.into_iter().take(20).collect::<Vec<_>>().join(", ")); }
         }
         return;
     }
     if dirs.len() > 1 {
-        println!("Nome «{name}» AMBIGUO: corrisponde a {} progetti distinti:", dirs.len());
+        if phosphor::lang::is_en() { println!("The name «{name}» is AMBIGUOUS: it matches {} distinct projects:", dirs.len()); } else { println!("Nome «{name}» AMBIGUO: corrisponde a {} progetti distinti:", dirs.len()); }
         for d in &dirs {
             println!("   {}", d.display());
         }
-        println!("Disambigua dalla TUI: seleziona una sessione del progetto giusto e usa «Cancella progetto».");
+        if phosphor::lang::is_en() { println!("Disambiguate from the TUI: select a session of the right project and use «Delete project»."); } else { println!("Disambigua dalla TUI: seleziona una sessione del progetto giusto e usa «Cancella progetto»."); }
         return;
     }
     let dir = dirs.into_iter().next().unwrap();
@@ -648,11 +648,11 @@ fn do_delete_project(base: &std::path::Path, sessions: &[Session], name: &str) {
     let bytes: u64 = subset.iter().map(|s| s.size).sum();
     let live = subset.iter().filter(|s| s.live == "running" || s.live == "idle").count();
 
-    println!("\nProgetto «{name}»");
+    if phosphor::lang::is_en() { println!("\nProject «{name}»"); } else { println!("\nProgetto «{name}»"); }
     if phosphor::lang::is_en() { println!("  folder:    {}", dir.display()); } else { println!("  cartella:  {}", dir.display()); }
     if phosphor::lang::is_en() { println!("  sessions:  {}  ({})", subset.len(), mb(bytes)); } else { println!("  sessioni:  {}  ({})", subset.len(), mb(bytes)); }
     if live > 0 {
-        println!("\n⚠  {live} sessione/i LIVE in questo progetto: chiudile prima di cancellare. Annullato.");
+        if phosphor::lang::is_en() { println!("\n⚠  {live} LIVE session(s) in this project: close them before deleting. Cancelled."); } else { println!("\n⚠  {live} sessione/i LIVE in questo progetto: chiudile prima di cancellare. Annullato."); }
         return;
     }
     // Rete di sicurezza: offri un backup .phx (recuperabile) prima della cancellazione.
@@ -660,14 +660,14 @@ fn do_delete_project(base: &std::path::Path, sessions: &[Session], name: &str) {
         do_export_bundle(base, &subset, None);
     }
     // Doppia conferma: riscrivere il nome esatto (come la cancellazione repo su GitHub).
-    println!("\n⚠  STAI PER CANCELLARE DEFINITIVAMENTE tutto il progetto — OPERAZIONE IRREVERSIBILE.");
+    if phosphor::lang::is_en() { println!("\n⚠  YOU ARE ABOUT TO PERMANENTLY DELETE the whole project — THIS CANNOT BE UNDONE."); } else { println!("\n⚠  STAI PER CANCELLARE DEFINITIVAMENTE tutto il progetto — OPERAZIONE IRREVERSIBILE."); }
     use std::io::Write;
-    print!("Per confermare, RISCRIVI il nome del progetto «{name}»: ");
+    if phosphor::lang::is_en() { print!("To confirm, RE-TYPE the project name «{name}»: "); } else { print!("Per confermare, RISCRIVI il nome del progetto «{name}»: "); }
     let _ = std::io::stdout().flush();
     let mut line = String::new();
     let ok = std::io::stdin().read_line(&mut line).is_ok() && line.trim() == name;
     if !ok {
-        println!("Il nome non corrisponde: NON è stato cancellato nulla.");
+        if phosphor::lang::is_en() { println!("The name does not match: NOTHING was deleted."); } else { println!("Il nome non corrisponde: NON è stato cancellato nulla."); }
         return;
     }
     match phosphor::delete_project_dir(base, &dir) {
@@ -688,7 +688,7 @@ fn do_retention_cmd(base: &std::path::Path, arg: Option<&str>) {
             if phosphor::lang::is_en() { println!("  in force   : {} days", ret::effective(base)); } else { println!("  in vigore  : {} giorni", ret::effective(base)); }
             if ret::at_risk(base) {
                 println!();
-                println!("⚠ Claude Code cancella da solo i transcript piu' vecchi di cosi', all'avvio.");
+                if phosphor::lang::is_en() { println!("⚠ Claude Code deletes transcripts older than this by itself, at startup."); } else { println!("⚠ Claude Code cancella da solo i transcript piu' vecchi di cosi', all'avvio."); }
                 if phosphor::lang::is_en() { println!("  No recycle bin, no backup: a project idle for a month disappears."); } else { println!("  Niente cestino, niente backup: un progetto fermo da un mese sparisce."); }
                 println!();
                 if phosphor::lang::is_en() { println!("  phosphor retention {}    to keep them ten years", ret::RECOMMENDED_DAYS); } else { println!("  phosphor retention {}    per tenerli 10 anni", ret::RECOMMENDED_DAYS); }
@@ -774,7 +774,7 @@ fn do_vault_cmd(base: &std::path::Path, verb: &str, arg: Option<&str>) {
                     bytes as f64 / 1_048_576.0
                 );
                 if failed > 0 {
-                    println!("  ⚠ {failed} non collegabili: gli hard link non attraversano i volumi.");
+                    if phosphor::lang::is_en() { println!("  ⚠ {failed} could not be linked: hard links do not cross volumes."); } else { println!("  ⚠ {failed} non collegabili: gli hard link non attraversano i volumi."); }
                     println!("    (succede se CODEX_HOME sta su un altro disco rispetto a ~/.claude)");
                 }
                 println!("  Da ora ogni scansione collega i nuovi. Quando un agente cancella un");
@@ -838,7 +838,7 @@ fn do_archive_project(base: &std::path::Path, sessions: &[Session], name: &str) 
         .filter_map(dir_of)
         .collect();
     if dirs.is_empty() {
-        println!("Nessun progetto chiamato «{name}».");
+        if phosphor::lang::is_en() { println!("No project called «{name}»."); } else { println!("Nessun progetto chiamato «{name}»."); }
         return;
     }
     if dirs.len() > 1 {
@@ -852,13 +852,13 @@ fn do_archive_project(base: &std::path::Path, sessions: &[Session], name: &str) 
     let subset: Vec<&Session> = sessions.iter().filter(|s| dir_of(s).as_deref() == Some(dir.as_path())).collect();
     let bytes: u64 = subset.iter().map(|s| s.size).sum();
     let live = subset.iter().filter(|s| s.live == "running" || s.live == "idle").count();
-    println!("\nArchivio «{name}»: {} sessioni ({}) — REVERSIBILE, non distrugge nulla.", subset.len(), mb(bytes));
+    if phosphor::lang::is_en() { println!("\nArchiving «{name}»: {} sessions ({}) — REVERSIBLE, nothing is destroyed.", subset.len(), mb(bytes)); } else { println!("\nArchivio «{name}»: {} sessioni ({}) — REVERSIBILE, non distrugge nulla.", subset.len(), mb(bytes)); }
     if live > 0 {
-        println!("⚠  {live} sessione/i LIVE: chiudile prima. Annullato.");
+        if phosphor::lang::is_en() { println!("⚠  {live} LIVE session(s): close them first. Cancelled."); } else { println!("⚠  {live} sessione/i LIVE: chiudile prima. Annullato."); }
         return;
     }
     if !confirm("Archiviare il progetto (sparisce dalla lista, ripristinabile)?") {
-        println!("Annullato.");
+        if phosphor::lang::is_en() { println!("Cancelled."); } else { println!("Annullato."); }
         return;
     }
     match phosphor::archive_project_dir(base, &dir) {
@@ -884,7 +884,7 @@ fn do_unarchive_project(base: &std::path::Path, name: &str) {
 fn do_archived_list(base: &std::path::Path) {
     let items = phosphor::list_archived(base);
     if items.is_empty() {
-        println!("Nessun progetto archiviato.");
+        if phosphor::lang::is_en() { println!("No archived projects."); } else { println!("Nessun progetto archiviato."); }
         return;
     }
     println!("Progetti archiviati ({}):", items.len());
@@ -918,7 +918,7 @@ fn do_wrapped(base: &std::path::Path, sessions: &[Session], cfg: &config::Config
     };
     let card = wrapped::render(sessions, cfg, now, &opts);
     if card.sessions_count == 0 {
-        println!("Nessuna sessione nella finestra «{}». Prova:  phosphor wrapped --window all", card.label);
+        if phosphor::lang::is_en() { println!("No sessions in the «{}» window. Try:  phosphor wrapped --window all", card.label); } else { println!("Nessuna sessione nella finestra «{}». Prova:  phosphor wrapped --window all", card.label); }
         return;
     }
     let dir = desktop_dir(base);
@@ -949,12 +949,12 @@ fn do_wrapped(base: &std::path::Path, sessions: &[Session], cfg: &config::Config
                 println!("    {}", png_path.display());
             }
             if svg_ok.is_ok() {
-                println!("    {}   (vettoriale, per stampa o ritocchi)", svg_path.display());
+                if phosphor::lang::is_en() { println!("    {}   (vector, for printing or touch-ups)", svg_path.display()); } else { println!("    {}   (vettoriale, per stampa o ritocchi)", svg_path.display()); }
             }
-            println!("\nIl PNG si incolla direttamente su X, Reddit, Slack: nessuno di loro");
-            println!("renderizza un SVG, ed era il motivo per cui la card non circolava.");
+            if phosphor::lang::is_en() { println!("\nThe PNG pastes straight into X, Reddit or Slack: none of them"); } else { println!("\nIl PNG si incolla direttamente su X, Reddit, Slack: nessuno di loro"); }
+            if phosphor::lang::is_en() { println!("renders an SVG, which is why the card never travelled."); } else { println!("renderizza un SVG, ed era il motivo per cui la card non circolava."); }
             if opts.anonymous {
-                println!("Privacy: mostra solo numeri (nessun nome progetto/percorso). Usa --with-projects per i nomi.");
+                if phosphor::lang::is_en() { println!("Privacy: numbers only (no project names or paths). Use --with-projects for the names."); } else { println!("Privacy: mostra solo numeri (nessun nome progetto/percorso). Usa --with-projects per i nomi."); }
             }
         }
     }
@@ -965,7 +965,7 @@ fn do_wrapped(base: &std::path::Path, sessions: &[Session], cfg: &config::Config
 /// timestamped file via `write_new`: it can never overwrite anything.
 fn do_export_bundle(base: &std::path::Path, sessions: &[Session], out: Option<PathBuf>) {
     if sessions.is_empty() {
-        println!("Nessuna sessione da esportare (controlla i filtri).");
+        if phosphor::lang::is_en() { println!("No sessions to export (check your filters)."); } else { println!("Nessuna sessione da esportare (controlla i filtri)."); }
         return;
     }
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
@@ -974,9 +974,9 @@ fn do_export_bundle(base: &std::path::Path, sessions: &[Session], out: Option<Pa
     let bytes = phosphor::bundle::build(base, sessions, &created);
     match phosphor::write_new(&path, &bytes) {
         Ok(()) => {
-            println!("✓ Esportate {} sessioni (transcript + sottocartelle) in un file portabile:", sessions.len());
+            if phosphor::lang::is_en() { println!("✓ Exported {} sessions (transcripts + subfolders) into one portable file:", sessions.len()); } else { println!("✓ Esportate {} sessioni (transcript + sottocartelle) in un file portabile:", sessions.len()); }
             println!("    {}  ({})", path.display(), mb(bytes.len() as u64));
-            println!("\nFile NUOVO: nessun file esistente è stato toccato.");
+            if phosphor::lang::is_en() { println!("\nA NEW file: nothing existing was touched."); } else { println!("\nFile NUOVO: nessun file esistente è stato toccato."); }
             println!("Copialo sull'altro PC e usa:  phosphor import \"{}\"", path.display());
         }
         Err(e) => eprintln!("✗ Export fallito ({e}). Esiste già un file con quel nome? Riprova."),
@@ -990,7 +990,7 @@ fn do_import(base: &std::path::Path, path: &std::path::Path, cli_remaps: &[(Stri
     let data = match phosphor::bundle::read_file(path) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("Non riesco a leggere «{}»: {e}", path.display());
+            if phosphor::lang::is_en() { eprintln!("Cannot read «{}»: {e}", path.display()); } else { eprintln!("Non riesco a leggere «{}»: {e}", path.display()); }
             return;
         }
     };
@@ -1007,7 +1007,7 @@ fn do_import_data(base: &std::path::Path, data: &[u8], cli_remaps: &[(String, St
     let parsed = match phosphor::bundle::inspect(data) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("Bundle non valido: {e}");
+            if phosphor::lang::is_en() { eprintln!("Invalid bundle: {e}"); } else { eprintln!("Bundle non valido: {e}"); }
             return;
         }
     };
@@ -1024,7 +1024,7 @@ fn do_import_data(base: &std::path::Path, data: &[u8], cli_remaps: &[(String, St
 
     let plan = phosphor::bundle::apply_remapped(base, data, &parsed, true, &remaps); // dry-run
 
-    println!("Bundle: {} sessioni, {} file.", m.count, parsed.files.len());
+    if phosphor::lang::is_en() { println!("Bundle: {} sessions, {} files.", m.count, parsed.files.len()); } else { println!("Bundle: {} sessioni, {} file.", m.count, parsed.files.len()); }
     if !m.created.is_empty() || !m.source_host.is_empty() {
         println!(
             "  creato: {}   origine: {} ({})",
@@ -1037,7 +1037,7 @@ fn do_import_data(base: &std::path::Path, data: &[u8], cli_remaps: &[(String, St
     // Show each source project and how it resolves on THIS machine.
     if !m.projects.is_empty() {
         let find = |src: &str| remaps.iter().find(|(f, _)| f == src).map(|(_, t)| t.clone());
-        println!("\nProgetti nel bundle (cartella di origine → dove finiranno qui):");
+        if phosphor::lang::is_en() { println!("\nProjects in the bundle (source folder → where they will land here):"); } else { println!("\nProgetti nel bundle (cartella di origine → dove finiranno qui):"); }
         for proj in &m.projects {
             match find(proj) {
                 Some(target) => {
@@ -1050,7 +1050,7 @@ fn do_import_data(base: &std::path::Path, data: &[u8], cli_remaps: &[(String, St
                 None => {
                     let here = std::path::Path::new(proj).is_dir();
                     if here {
-                        println!("  {proj}   [percorso presente qui: resume diretto]");
+                        if phosphor::lang::is_en() { println!("  {proj}   [path exists here: resume works directly]"); } else { println!("  {proj}   [percorso presente qui: resume diretto]"); }
                     } else {
                         println!("  {proj}   ⚠ percorso non presente qui — per il resume aggiungi:  --remap \"{proj}=<percorso-locale>\"");
                     }
@@ -1059,20 +1059,20 @@ fn do_import_data(base: &std::path::Path, data: &[u8], cli_remaps: &[(String, St
         }
     }
 
-    println!("\nDestinazione: {}", base.join("projects").display());
-    println!("  da AGGIUNGERE          : {} file ({})", plan.added, mb(plan.bytes));
-    println!("  già presenti (saltati) : {} file  ← restano intatti, niente sovrascrittura", plan.skipped);
+    if phosphor::lang::is_en() { println!("\nDestination: {}", base.join("projects").display()); } else { println!("\nDestinazione: {}", base.join("projects").display()); }
+    if phosphor::lang::is_en() { println!("  to ADD                 : {} files ({})", plan.added, mb(plan.bytes)); } else { println!("  da AGGIUNGERE          : {} file ({})", plan.added, mb(plan.bytes)); }
+    if phosphor::lang::is_en() { println!("  already here (skipped) : {} files  ← left untouched, nothing overwritten", plan.skipped); } else { println!("  già presenti (saltati) : {} file  ← restano intatti, niente sovrascrittura", plan.skipped); }
     if plan.rejected > 0 {
-        println!("  ⚠ percorsi NON sicuri rifiutati: {}", plan.rejected);
+        if phosphor::lang::is_en() { println!("  ⚠ unsafe paths refused: {}", plan.rejected); } else { println!("  ⚠ percorsi NON sicuri rifiutati: {}", plan.rejected); }
     }
 
     if plan.added == 0 {
-        println!("\nNiente da aggiungere: tutto è già presente. ✓");
+        if phosphor::lang::is_en() { println!("\nNothing to add: it is all here already. ✓"); } else { println!("\nNiente da aggiungere: tutto è già presente. ✓"); }
         return;
     }
-    println!("\nL'import NON modifica né elimina nulla: aggiunge solo i file mancanti.");
+    if phosphor::lang::is_en() { println!("\nImport changes and deletes NOTHING: it only adds the missing files."); } else { println!("\nL'import NON modifica né elimina nulla: aggiunge solo i file mancanti."); }
     if !confirm(&format!("Aggiungere {} file ({}) in {}?", plan.added, mb(plan.bytes), base.join("projects").display())) {
-        println!("Annullato: non è stato scritto nulla.");
+        if phosphor::lang::is_en() { println!("Cancelled: nothing was written."); } else { println!("Annullato: non è stato scritto nulla."); }
         return;
     }
     let _ = std::fs::create_dir_all(base.join("projects"));
@@ -1100,7 +1100,7 @@ fn do_import_data(base: &std::path::Path, data: &[u8], cli_remaps: &[(String, St
         }
         if changed {
             phosphor::config::save(base, &cfg2);
-            println!("  ↳ remap salvato in config (pathRemaps): il resume lo userà da ora in poi.");
+            if phosphor::lang::is_en() { println!("  ↳ remap saved in the config (pathRemaps): resume will use it from now on."); } else { println!("  ↳ remap salvato in config (pathRemaps): il resume lo userà da ora in poi."); }
         }
     }
 }
@@ -1120,21 +1120,21 @@ fn do_remote_cmd(base: &std::path::Path, verb: &str, alias: Option<&str>) {
             let a = match alias {
                 Some(a) => a,
                 None => {
-                    eprintln!("Uso: phosphor remote add <alias-ssh>");
+                    if phosphor::lang::is_en() { eprintln!("Usage: phosphor remote add <ssh-alias>"); } else { eprintln!("Uso: phosphor remote add <alias-ssh>"); }
                     return;
                 }
             };
             if !phosphor::fleet::valid_alias(a) {
-                eprintln!("Alias non valido: ammessi alfanumerici e _ . @ - (iniziale alfanumerica, max 64).");
+                if phosphor::lang::is_en() { eprintln!("Invalid alias: alphanumerics and _ . @ - only (must start alphanumeric, max 64)."); } else { eprintln!("Alias non valido: ammessi alfanumerici e _ . @ - (iniziale alfanumerica, max 64)."); }
                 return;
             }
             if cfg.remotes.iter().any(|x| x == a) {
-                println!("«{a}» è già configurato.");
+                if phosphor::lang::is_en() { println!("«{a}» is already configured."); } else { println!("«{a}» è già configurato."); }
                 return;
             }
             cfg.remotes.push(a.to_string());
             phosphor::config::save(base, &cfg);
-            println!("✓ Aggiunto «{a}» (Phosphor salva SOLO l'alias: host e chiavi restano in ~/.ssh/config).");
+            if phosphor::lang::is_en() { println!("✓ Added «{a}» (Phosphor stores ONLY the alias: hosts and keys stay in ~/.ssh/config)."); } else { println!("✓ Aggiunto «{a}» (Phosphor salva SOLO l'alias: host e chiavi restano in ~/.ssh/config)."); }
             if phosphor::lang::is_en() { println!("  Try it now:  phosphor fleet"); } else { println!("  Prova subito:  phosphor fleet"); }
         }
         "rm" | "remove" => {
@@ -1156,8 +1156,8 @@ fn do_remote_cmd(base: &std::path::Path, verb: &str, alias: Option<&str>) {
         }
         _ => {
             if cfg.remotes.is_empty() {
-                println!("Nessun PC remoto configurato.");
-                println!("Aggiungi:  phosphor remote add <alias-ssh>   (alias di ~/.ssh/config o utente@host)");
+                if phosphor::lang::is_en() { println!("No remote PC configured."); } else { println!("Nessun PC remoto configurato."); }
+                println!("{}", if phosphor::lang::is_en() { "Add one:  phosphor remote add <ssh-alias>   (an alias from ~/.ssh/config, or user@host)" } else { "Aggiungi:  phosphor remote add <alias-ssh>   (alias di ~/.ssh/config o utente@host)" });
             } else {
                 println!("PC remoti ({}):", cfg.remotes.len());
                 for a in &cfg.remotes {
@@ -1174,10 +1174,10 @@ fn do_fleet(base: &std::path::Path) {
     use std::io::Write as _;
     let cfg = phosphor::config::load(base);
     if cfg.remotes.is_empty() {
-        println!("Nessun PC remoto configurato.  Aggiungi:  phosphor remote add <alias-ssh>");
+        if phosphor::lang::is_en() { println!("No remote PC configured.  Add one:  phosphor remote add <ssh-alias>"); } else { println!("Nessun PC remoto configurato.  Aggiungi:  phosphor remote add <alias-ssh>"); }
         return;
     }
-    println!("Flotta: {} host (via ssh, sola lettura)\n", cfg.remotes.len());
+    if phosphor::lang::is_en() { println!("Fleet: {} hosts (over ssh, read-only)\n", cfg.remotes.len()); } else { println!("Flotta: {} host (via ssh, sola lettura)\n", cfg.remotes.len()); }
     let mut tot = 0usize;
     for alias in &cfg.remotes {
         print!("  {:<24} ", crop(alias, 24));
@@ -1187,13 +1187,13 @@ fn do_fleet(base: &std::path::Path) {
                 let list = phosphor::fleet::parse_sessions_json(&bytes, alias);
                 let live = list.iter().filter(|s| s.live == "running" || s.live == "idle").count();
                 let sz: u64 = list.iter().map(|s| s.size).sum();
-                println!("{:>5} sessioni · {live} live · {}", list.len(), mb(sz));
+                if phosphor::lang::is_en() { println!("{:>5} sessions · {live} live · {}", list.len(), mb(sz)); } else { println!("{:>5} sessioni · {live} live · {}", list.len(), mb(sz)); }
                 tot += list.len();
             }
             Err(e) => println!("✗ {}", tame(&e)),
         }
     }
-    println!("\nTotale remoto: {tot} sessioni. Nella TUI premi F per unirle alla lista.");
+    if phosphor::lang::is_en() { println!("\nRemote total: {tot} sessions. In the TUI press F to merge them into the list."); } else { println!("\nTotale remoto: {tot} sessioni. Nella TUI premi F per unirle alla lista."); }
 }
 
 /// `phosphor resume-here <id>` — resume a session with `claude --resume` IN
@@ -1203,13 +1203,13 @@ fn do_fleet(base: &std::path::Path) {
 /// locally too. Exits with claude's exit code so failures show in the caller.
 fn do_resume_here(sessions: &[Session], id: &str, remaps: &[(String, String)]) {
     if !phosphor::valid_session_id(id) {
-        eprintln!("Id sessione non valido.");
+        if phosphor::lang::is_en() { eprintln!("Invalid session id."); } else { eprintln!("Id sessione non valido."); }
         std::process::exit(2);
     }
     let s = match sessions.iter().find(|s| s.id == *id) {
         Some(s) => s,
         None => {
-            eprintln!("Nessuna sessione con id {id} su questa macchina.");
+            if phosphor::lang::is_en() { eprintln!("No session with id {id} on this machine."); } else { eprintln!("Nessuna sessione con id {id} su questa macchina."); }
             std::process::exit(2);
         }
     };
@@ -1217,8 +1217,8 @@ fn do_resume_here(sessions: &[Session], id: &str, remaps: &[(String, String)]) {
     let (cwd, fork) = match phosphor::resolve_cwd(&recorded, remaps) {
         Some(x) => x,
         None => {
-            eprintln!("La cartella del progetto non esiste qui: {}", tame(&recorded));
-            eprintln!("Aggiungi un remap in phosphor.json (pathRemaps) o ricrea la cartella.");
+            if phosphor::lang::is_en() { eprintln!("The project folder does not exist here: {}", tame(&recorded)); } else { eprintln!("La cartella del progetto non esiste qui: {}", tame(&recorded)); }
+            if phosphor::lang::is_en() { eprintln!("Add a remap in phosphor.json (pathRemaps), or recreate the folder."); } else { eprintln!("Aggiungi un remap in phosphor.json (pathRemaps) o ricrea la cartella."); }
             std::process::exit(2);
         }
     };
@@ -1246,7 +1246,7 @@ fn do_resume_here(sessions: &[Session], id: &str, remaps: &[(String, String)]) {
     match cmd.status() {
         Ok(st) => std::process::exit(st.code().unwrap_or(1)),
         Err(e) => {
-            eprintln!("Impossibile lanciare claude: {e}");
+            if phosphor::lang::is_en() { eprintln!("Cannot launch claude: {e}"); } else { eprintln!("Impossibile lanciare claude: {e}"); }
             std::process::exit(2);
         }
     }
@@ -1350,41 +1350,49 @@ fn do_sync(base: &std::path::Path, action: &str, set_path: Option<&str>, push_se
         let p = match set_path {
             Some(p) => p,
             None => {
-                eprintln!("Uso:  phosphor sync set <cartella-del-repo-git>");
+                if phosphor::lang::is_en() { eprintln!("Usage:  phosphor sync set <git-repo-folder>"); } else { eprintln!("Uso:  phosphor sync set <cartella-del-repo-git>"); }
                 return;
             }
         };
         let repo = PathBuf::from(p);
         if !repo.is_dir() {
-            eprintln!("Non è una cartella: {p}");
+            if phosphor::lang::is_en() { eprintln!("Not a folder: {p}"); } else { eprintln!("Non è una cartella: {p}"); }
             return;
         }
         if git(&repo, &["rev-parse", "--is-inside-work-tree"]).is_err() {
-            eprintln!("«{p}» non è un repository git.");
-            eprintln!("Prima clona il tuo repo PRIVATO in locale, es.:");
-            eprintln!("  git clone <tuo-repo-privato> \"{p}\"");
+            if phosphor::lang::is_en() { eprintln!("«{p}» is not a git repository."); } else { eprintln!("«{p}» non è un repository git."); }
+            if phosphor::lang::is_en() { eprintln!("Clone your PRIVATE repo locally first, e.g.:"); } else { eprintln!("Prima clona il tuo repo PRIVATO in locale, es.:"); }
+            eprintln!("  git clone {} \"{p}\"", if phosphor::lang::is_en() { "<your-private-repo>" } else { "<tuo-repo-privato>" });
             return;
         }
         let mut cfg = config::load(base);
         cfg.sync_repo = repo.to_string_lossy().to_string();
         config::save(base, &cfg);
-        println!("✓ Repo di sync impostato in phosphor.json:\n    {}", repo.display());
-        println!("Ora:  phosphor sync push   (invia)    ·    phosphor sync pull   (recupera)");
+        if phosphor::lang::is_en() { println!("✓ Sync repo set in phosphor.json:\n    {}", repo.display()); } else { println!("✓ Repo di sync impostato in phosphor.json:\n    {}", repo.display()); }
+        if phosphor::lang::is_en() { println!("Now:  phosphor sync push   (send)    ·    phosphor sync pull   (fetch)"); } else { println!("Ora:  phosphor sync push   (invia)    ·    phosphor sync pull   (recupera)"); }
         return;
     }
 
     let cfg = config::load(base);
     if cfg.sync_repo.trim().is_empty() {
-        eprintln!("Sync non configurato. Serve un repo git PRIVATO clonato in locale:");
-        eprintln!("  1) git clone <tuo-repo-privato>  C:\\percorso\\phosphor-sync");
-        eprintln!("  2) phosphor sync set C:\\percorso\\phosphor-sync");
-        eprintln!("Poi:  phosphor sync push   /   phosphor sync pull");
+        if phosphor::lang::is_en() { eprintln!("Sync is not configured. It needs a PRIVATE git repo cloned locally:"); } else { eprintln!("Sync non configurato. Serve un repo git PRIVATO clonato in locale:"); }
+        if phosphor::lang::is_en() {
+            eprintln!("  1) git clone <your-private-repo>  C:\\path\\phosphor-sync");
+        } else {
+            eprintln!("  1) git clone <tuo-repo-privato>  C:\\percorso\\phosphor-sync");
+        }
+        if phosphor::lang::is_en() {
+            eprintln!("  2) phosphor sync set C:\\path\\phosphor-sync");
+        } else {
+            eprintln!("  2) phosphor sync set C:\\percorso\\phosphor-sync");
+        }
+        if phosphor::lang::is_en() { eprintln!("Then:  phosphor sync push   /   phosphor sync pull"); } else { eprintln!("Poi:  phosphor sync push   /   phosphor sync pull"); }
         return;
     }
     let repo = PathBuf::from(&cfg.sync_repo);
     if !repo.is_dir() || git(&repo, &["rev-parse", "--is-inside-work-tree"]).is_err() {
-        eprintln!("Repo di sync assente o non valido:\n    {}", repo.display());
-        eprintln!("Correggi 'syncRepo' in phosphor.json oppure:  phosphor sync set <cartella>");
+        if phosphor::lang::is_en() { eprintln!("Sync repo missing or invalid:\n    {}", repo.display()); } else { eprintln!("Repo di sync assente o non valido:\n    {}", repo.display()); }
+        if phosphor::lang::is_en() { eprintln!("Fix 'syncRepo' in phosphor.json, or:  phosphor sync set <folder>"); } else { eprintln!("Correggi 'syncRepo' in phosphor.json oppure:  phosphor sync set <cartella>"); }
         return;
     }
 
@@ -1396,11 +1404,11 @@ fn do_sync(base: &std::path::Path, action: &str, set_path: Option<&str>, push_se
 }
 
 fn do_sync_status(repo: &std::path::Path, encrypt_to: &str) {
-    println!("Repo di sync:\n    {}", repo.display());
+    if phosphor::lang::is_en() { println!("Sync repo:\n    {}", repo.display()); } else { println!("Repo di sync:\n    {}", repo.display()); }
     if let Ok(o) = git(repo, &["remote", "get-url", "origin"]) {
         let url = o.trim();
         if !url.is_empty() {
-            println!("Remoto (origin):  {url}");
+            if phosphor::lang::is_en() { println!("Remote (origin):  {url}"); } else { println!("Remoto (origin):  {url}"); }
         }
     }
     if encrypt_to.trim().is_empty() {
@@ -1427,7 +1435,7 @@ fn do_sync_status(repo: &std::path::Path, encrypt_to: &str) {
         }
     }
     if !found {
-        println!("  (nessun bundle ancora — usa  phosphor sync push)");
+        if phosphor::lang::is_en() { println!("  (no bundle yet — use  phosphor sync push)"); } else { println!("  (nessun bundle ancora — usa  phosphor sync push)"); }
     }
 }
 
@@ -1444,7 +1452,7 @@ fn clip_str(s: &str, n: usize) -> String {
 
 fn do_sync_push(base: &std::path::Path, repo: &std::path::Path, sessions: &[Session], encrypt_to: &str) {
     if sessions.is_empty() {
-        println!("Nessuna sessione da sincronizzare (controlla i filtri).");
+        if phosphor::lang::is_en() { println!("No sessions to sync (check your filters)."); } else { println!("Nessuna sessione da sincronizzare (controlla i filtri)."); }
         return;
     }
     let host = host_tag();
@@ -1457,9 +1465,9 @@ fn do_sync_push(base: &std::path::Path, repo: &std::path::Path, sessions: &[Sess
     // leak plaintext. Public-key (recipient) based — no secret is stored here.
     let (fname, payload) = if !encrypt_to.trim().is_empty() {
         if !tool_exists("age") {
-            eprintln!("⚠ Cifratura richiesta (syncEncrypt) ma 'age' non è sul PATH.");
-            eprintln!("  Annullo per non inviare in chiaro. Installa age, oppure svuota");
-            eprintln!("  syncEncrypt in phosphor.json.  (https://age-encryption.org)");
+            if phosphor::lang::is_en() { eprintln!("⚠ Encryption requested (syncEncrypt) but 'age' is not on the PATH."); } else { eprintln!("⚠ Cifratura richiesta (syncEncrypt) ma 'age' non è sul PATH."); }
+            if phosphor::lang::is_en() { eprintln!("  Cancelling rather than sending in the clear. Install age, or empty"); } else { eprintln!("  Annullo per non inviare in chiaro. Installa age, oppure svuota"); }
+            if phosphor::lang::is_en() { eprintln!("  syncEncrypt in phosphor.json.  (https://age-encryption.org)"); } else { eprintln!("  syncEncrypt in phosphor.json.  (https://age-encryption.org)"); }
             return;
         }
         match age_encrypt(encrypt_to.trim(), &bytes) {
@@ -1471,18 +1479,18 @@ fn do_sync_push(base: &std::path::Path, repo: &std::path::Path, sessions: &[Sess
     };
 
     if payload.len() as u64 > 100 * 1024 * 1024 {
-        eprintln!("⚠ Il bundle supera 100 MiB: GitHub potrebbe rifiutare il push.");
-        eprintln!("  Spezzalo per progetto:  phosphor sync push --project <nome>");
+        if phosphor::lang::is_en() { eprintln!("⚠ The bundle is over 100 MiB: GitHub may refuse the push."); } else { eprintln!("⚠ Il bundle supera 100 MiB: GitHub potrebbe rifiutare il push."); }
+        if phosphor::lang::is_en() { eprintln!("  Split it by project:  phosphor sync push --project <name>"); } else { eprintln!("  Spezzalo per progetto:  phosphor sync push --project <nome>"); }
     }
     if let Err(e) = std::fs::write(repo.join(&fname), &payload) {
-        eprintln!("Scrittura di {fname} fallita: {e}");
+        if phosphor::lang::is_en() { eprintln!("Writing {fname} failed: {e}"); } else { eprintln!("Scrittura di {fname} fallita: {e}"); }
         return;
     }
     // Keep only the chosen variant for this host (drop the stale plain/enc twin).
     let twin = if fname == enc_name { &plain_name } else { &enc_name };
     let _ = std::fs::remove_file(repo.join(twin));
     let enc_note = if fname == enc_name { " (cifrato)" } else { "" };
-    println!("Bundle{enc_note}: {fname}  ({}, {} sessioni)", mb(payload.len() as u64), sessions.len());
+    if phosphor::lang::is_en() { println!("Bundle{enc_note}: {fname}  ({}, {} sessions)", mb(payload.len() as u64), sessions.len()); } else { println!("Bundle{enc_note}: {fname}  ({}, {} sessioni)", mb(payload.len() as u64), sessions.len()); }
 
     // Stage everything (handles the new file plus the removed twin).
     if let Err(e) = git(repo, &["add", "-A"]) {
@@ -1495,7 +1503,7 @@ fn do_sync_push(base: &std::path::Path, repo: &std::path::Path, sessions: &[Sess
         Ok(_) => {}
         Err(e) => {
             if e.to_lowercase().contains("nothing to commit") {
-                println!("Nessuna modifica da inviare: il bundle è identico all'ultimo. ✓");
+                if phosphor::lang::is_en() { println!("Nothing to send: the bundle is identical to the last one. ✓"); } else { println!("Nessuna modifica da inviare: il bundle è identico all'ultimo. ✓"); }
                 return;
             }
             eprintln!("git commit: {e}");
@@ -1507,8 +1515,8 @@ fn do_sync_push(base: &std::path::Path, repo: &std::path::Path, sessions: &[Sess
         Ok(_) => println!("✓ inviato."),
         Err(e) => {
             println!();
-            eprintln!("git push fallito: {e}");
-            eprintln!("(controlla remoto e credenziali del repo: il push lo gestisce git, non Phosphor)");
+            if phosphor::lang::is_en() { eprintln!("git push failed: {e}"); } else { eprintln!("git push fallito: {e}"); }
+            if phosphor::lang::is_en() { eprintln!("(check the repo remote and credentials: git handles the push, not Phosphor)"); } else { eprintln!("(controlla remoto e credenziali del repo: il push lo gestisce git, non Phosphor)"); }
         }
     }
 }
@@ -1519,7 +1527,7 @@ fn do_sync_pull(base: &std::path::Path, repo: &std::path::Path, identity: &str) 
         Ok(_) => println!("ok."),
         Err(e) => {
             println!();
-            eprintln!("git pull fallito: {e}");
+            if phosphor::lang::is_en() { eprintln!("git pull failed: {e}"); } else { eprintln!("git pull fallito: {e}"); }
             return;
         }
     }
@@ -1542,10 +1550,10 @@ fn do_sync_pull(base: &std::path::Path, repo: &std::path::Path, identity: &str) 
     }
     files.sort();
     if files.is_empty() {
-        println!("Nessun bundle di altri PC da importare.");
+        if phosphor::lang::is_en() { println!("No bundles from other PCs to import."); } else { println!("Nessun bundle di altri PC da importare."); }
         return;
     }
-    println!("Trovati {} bundle da altri PC. Li importo (con conferma, niente sovrascrittura):", files.len());
+    if phosphor::lang::is_en() { println!("Found {} bundles from other PCs. Importing them (with confirmation, nothing overwritten):", files.len()); } else { println!("Trovati {} bundle da altri PC. Li importo (con conferma, niente sovrascrittura):", files.len()); }
     for f in &files {
         let name = f.file_name().and_then(|n| n.to_str()).unwrap_or("?");
         println!("\n── {name}");
@@ -1564,7 +1572,7 @@ fn do_sync_pull(base: &std::path::Path, repo: &std::path::Path, identity: &str) 
 /// `phosphor watch` — poll and print live state transitions (Ctrl+C to stop).
 fn do_watch(base: &std::path::Path, cache_map: &mut std::collections::HashMap<String, Session>, prices: &config::Prices, interval: u64) {
     use std::collections::{HashMap, HashSet};
-    println!("Phosphor watch — Ctrl+C per uscire (ogni {}s)\n", interval.max(2));
+    if phosphor::lang::is_en() { println!("Phosphor watch — Ctrl+C to quit (every {}s)\n", interval.max(2)); } else { println!("Phosphor watch — Ctrl+C per uscire (ogni {}s)\n", interval.max(2)); }
     let mut prev: HashMap<String, String> = HashMap::new();
     let mut stuck: HashSet<String> = HashSet::new();
     let mut first = true;
